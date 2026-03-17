@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# 虚拟环境
+.env
+.venv
+env/
+venv/
+ENV/
+
+# 模型检查点（大文件）
+*.pth
+*.pth.tar
+*.pt
+*.ckpt
+
+# 数据文件（大文件）
+*.feather
+*.parquet
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+
+# 大型 CSV 预测结果
+WORK_SPACE/model_res_0/model_res_0_predictions.csv
+WORK_SPACE/model_res_0_output/
+
+# 原始股票数据（大量图片/数据）
+WORK_SPACE/data/processed_data/
+WORK_SPACE/data/stocks_dataset/
+SPX_volume_price/2*/
+
+# Jupyter Notebook 检查点
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 日志
+*.log
+logs/
