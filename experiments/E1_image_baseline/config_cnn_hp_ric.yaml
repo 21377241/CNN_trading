@@ -1,0 +1,49 @@
+# E1b CNN HP search with val Rank IC (NOT MCC). Does NOT overwrite E1b_cnn_hp_I20R5.
+spec: I20R5
+window_size: 20
+predict_window: 5
+freq: week
+country: CHN
+
+# Primary selection metric for Phase 1–3 ranking
+search_metric: val_rank_ic
+
+train_years: [2000, 2001, 2002, 2003, 2004, 2005]
+val_years: [2006, 2007]
+oos_years: [2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
+
+dataset_subdir: I20R5
+out_root: WORK_SPACE/paper/E1b_cnn_hp_I20R5_ric
+
+batch_size: 128
+max_epochs: 50
+n_ensembles_full: 5
+
+anchor:
+  lr: 1.0e-5
+  dropout: 0.50
+  patience: 2
+
+grid:
+  lr: [3.0e-6, 1.0e-5, 3.0e-5, 1.0e-4]
+  dropout: [0.40, 0.50, 0.60]
+  patience: [2, 5]
+
+phases:
+  phase1:
+    n_ensembles: 1
+    patience_override: 1
+    use_grid_patience: false
+  phase2:
+    n_ensembles: 1
+    top_k: 3
+    use_grid_patience: true
+  phase3:
+    n_ensembles: 5
+    top_k: 2
+    # gap on Rank IC scale (~0.002–0.01 typical)
+    val_metric_gap_for_top2: 0.002
+    always_full_train_anchor_if_not_in_top: true
+
+e2_bridge_sharpe_delta: 0.15
+baseline_ew_hl_sharpe: 2.65
