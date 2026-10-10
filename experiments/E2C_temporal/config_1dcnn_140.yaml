@@ -1,0 +1,31 @@
+# 1D-CNN-140（clean_spec 5.2）：超参数全部沿用 config_1dcnn_120.yaml，只把 per_day_features 改为 7
+# （O, H, L, C, MA20, V, has_trade；数据修正带来的输入表示变化，不属于调参）。
+window_size: 20
+per_day_features: 7
+seed: 42
+seeds: [42, 43, 44, 45, 46]
+ann_factor: 52
+split_mode: chrono
+chrono_train_years: [2000, 2001, 2002, 2003, 2004, 2005]
+chrono_val_years: [2006, 2007]
+model_tag: 1dcnn140
+pred_format: parquet
+
+paths:
+  features_root: WORK_SPACE/paper/clean_inputs/features140
+  out_root: WORK_SPACE/paper/E2C_temporal_1dcnn_140
+
+model:
+  hidden_channels: [32, 64]
+  kernel_size: 3
+  dropout: 0.25
+
+train:
+  batch_size: 4096
+  max_epochs: 80
+  patience: 10
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  num_workers: 0
+  monitor: rank_ic
+  device: auto

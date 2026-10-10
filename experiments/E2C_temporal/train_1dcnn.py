@@ -299,22 +299,34 @@ def main(argv=None):
         with open(os.path.join(out_root, 'models', 'train_summary.json'), 'w', encoding='utf-8') as f:
             json.dump({'infos': infos, 'config': cfg}, f, indent=2)
 
+    tag = str(cfg.get('model_tag', '1dcnn120'))
+    fmt = str(cfg.get('pred_format', 'csv'))
+    base_cols = ['StockID', 'ending_date', 'ret_val', 'MarketCap', 'binary_label']
+
+    def write(out: pd.DataFrame, name: str) -> str:
+        path = os.path.join(out_root, 'preds', f'{name}.{fmt}')
+        if fmt == 'parquet':
+            out.assign(StockID=out['StockID'].astype(str)).to_parquet(path, index=False)
+        else:
+            out.to_csv(path, index=False)
+        return path
+
     pred_cols = []
     for seed in seeds:
         p = predict_oos_seed(cfg, seed, X_oos, meta_oos, out_root)
         pred_cols.append(p)
-        out = meta_oos[['StockID', 'ending_date', 'ret_val', 'MarketCap', 'binary_label']].copy()
-        out['up_prob'] = p
-        out_path = os.path.join(out_root, 'preds', f'pred_1dcnn120_seed{seed}_oos.csv')
-        out.to_csv(out_path, index=False)
-        logger.info(f'wrote {out_path} rows={len(out):,}')
+        if fmt == 'csv':
+            out = meta_oos[base_cols].copy()
+            out['up_prob'] = p
+            logger.info(f'wrote {write(out, f"pred_{tag}_seed{seed}_oos")} rows={len(out):,}')
 
     p_bag = np.mean(np.vstack(pred_cols), axis=0)
-    out = meta_oos[['StockID', 'ending_date', 'ret_val', 'MarketCap', 'binary_label']].copy()
+    out = meta_oos[base_cols].copy()
     out['up_prob'] = p_bag
-    out_path = os.path.join(out_root, 'preds', 'pred_1dcnn120_oos.csv')
-    out.to_csv(out_path, index=False)
-    logger.info(f'wrote {out_path} rows={len(out):,} seeds={seeds}')
+    if fmt != 'csv':
+        for seed, p in zip(seeds, pred_cols):
+            out[f'up_prob_seed{seed}'] = p
+    logger.info(f'wrote {write(out, f"pred_{tag}_oos")} rows={len(out):,} seeds={seeds}')
     return 0
 
 

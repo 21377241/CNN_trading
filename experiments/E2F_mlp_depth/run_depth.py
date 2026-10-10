@@ -1,11 +1,18 @@
-"""E2F: fixed-protocol MLP depth robustness on the 120D chrono panel."""
+"""E2F: fixed-protocol MLP depth robustness on the 120D chrono panel.
+
+Clean-data MLP-4-140 (clean_spec 5.3):
+  python experiments/E2F_mlp_depth/run_depth.py --features-root WORK_SPACE/paper/clean_inputs/features140 \
+      --out-root WORK_SPACE/paper/E2F_mlp_depth_140 --depths MLP-4 --tag 140 --no-portfolio
+"""
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 
@@ -51,6 +58,25 @@ def seed_metrics(out: pd.DataFrame) -> dict:
 
 
 def main() -> int:
+    global FEATURE_ROOT, OUT_ROOT, DEPTHS
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--features-root', default=None)
+    ap.add_argument('--out-root', default=None)
+    ap.add_argument('--depths', nargs='*', default=None, help=f'subset of {list(DEPTHS)}')
+    ap.add_argument('--tag', default='', help='suffix for model names and prediction files, e.g. 140')
+    ap.add_argument('--no-portfolio', action='store_true',
+                    help='skip run_portfolio_analysis; EW/VW Sharpe from seed_metrics on labelled rows')
+    args = ap.parse_args()
+    if args.features_root:
+        FEATURE_ROOT = PROJECT_ROOT / args.features_root
+    if args.out_root:
+        OUT_ROOT = PROJECT_ROOT / args.out_root
+    if args.depths:
+        DEPTHS = {k: DEPTHS[k] for k in args.depths}
+    if args.tag:
+        DEPTHS = {f'{k}-{args.tag}': v for k, v in DEPTHS.items()}
+    pred_ext = 'parquet' if args.no_portfolio else 'csv'
+
     OUT_ROOT.mkdir(parents=True, exist_ok=True)
     X_is = np.load(FEATURE_ROOT / 'X_is.npy')
     X_oos = np.load(FEATURE_ROOT / 'X_oos.npy')
@@ -85,19 +111,32 @@ def main() -> int:
         with open(model_dir / 'fit_info.json', 'w', encoding='utf-8') as f:
             json.dump({'hidden_layer_sizes': hidden, 'seeds': SEEDS,
                        'infos': infos, 'input_dim': int(X_is.shape[1])}, f, indent=2)
+        for seed, pipe in zip(SEEDS, pipes):
+            joblib.dump(pipe, model_dir / f'seed{seed}.joblib')
         # Each fitted Pipeline owns its StandardScaler; pass raw features once.
         seed_scores = [pipe.predict_proba(X_oos)[:, 1] for pipe in pipes]
         score = np.mean(np.stack(seed_scores, axis=0), axis=0)
         out = meta_oos[['StockID', 'ending_date', 'ret_val', 'MarketCap', 'binary_label']].copy()
         out['up_prob'] = score
-        pred_path = pred_dir / f'pred_{name.lower().replace("-", "")}_oos.csv'
-        out.to_csv(pred_path, index=False)
-        run_portfolio_analysis(result_files=[str(pred_path)], output_dir=str(port_dir),
-                               n_ensembles=5, n_decile=10, ann_factor=52)
-        ic = summarize_ic(cross_section_ic(out, 'up_prob'))
-        summary = port_dir / 'portfolio_summary.txt'
-        text = summary.read_text(encoding='utf-8', errors='ignore') if summary.exists() else ''
+        pred_path = pred_dir / f'pred_{name.lower().replace("-", "")}_oos.{pred_ext}'
         ew = vw = np.nan
+        if args.no_portfolio:
+            full = out.assign(StockID=out['StockID'].astype(str))
+            for seed, s in zip(SEEDS, seed_scores):
+                full[f'up_prob_seed{seed}'] = s
+            full.to_parquet(pred_path, index=False)
+            out = out[np.isfinite(out['ret_val'])].copy()
+            sm = seed_metrics(out)
+            ew, vw = sm['ew_hl_sharpe'], sm['vw_hl_sharpe']
+            ic = summarize_ic(cross_section_ic(out, 'up_prob'))
+            text = ''
+        else:
+            out.to_csv(pred_path, index=False)
+            run_portfolio_analysis(result_files=[str(pred_path)], output_dir=str(port_dir),
+                                   n_ensembles=5, n_decile=10, ann_factor=52)
+            ic = summarize_ic(cross_section_ic(out, 'up_prob'))
+            summary = port_dir / 'portfolio_summary.txt'
+            text = summary.read_text(encoding='utf-8', errors='ignore') if summary.exists() else ''
         section = None
         for line in text.splitlines():
             if 'Equal-Weight' in line or '等权' in line:
@@ -117,7 +156,7 @@ def main() -> int:
         seed_rows = []
         for seed, seed_score in zip(SEEDS, seed_scores):
             seed_out = out.drop(columns=['up_prob']).copy()
-            seed_out['up_prob'] = seed_score
+            seed_out['up_prob'] = seed_score[out.index.to_numpy()]
             sm = seed_metrics(seed_out)
             seed_rows.append({'model': name, 'seed': seed, **sm})
         pd.DataFrame(seed_rows).to_csv(
