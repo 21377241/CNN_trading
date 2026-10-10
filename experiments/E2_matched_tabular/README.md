@@ -1,6 +1,6 @@
 # E2 — Matched-Information Benchmark
 
-对照设计见 [`docs/paper_e2_design.md`](../../docs/paper_e2_design.md)。
+对照设计见 [`docs/design/paper_e2_design.md`](../../docs/design/paper_e2_design.md)。
 
 ## 设定摘要
 
@@ -8,7 +8,7 @@
 - 模型：SGD Logit（原文规格 + IS-val 网格） | **HistGB**（主） | MLP；CNN = 已有 I20R5 `up_prob`
 - **主协议切分**：IS 2000–2007（70/30, seed=42）；OOS 2008–2025
 - 产物：`WORK_SPACE/paper/E2_matched_is/`（120 维）与 `E2_matched_is_ind/`（180 维）
-- 统一结果：[`docs/paper_results_E2.md`](../../docs/paper_results_E2.md)
+- 统一结果：[`docs/results/paper_results_E2.md`](../../docs/results/paper_results_E2.md)
 
 ### 额外稳健性：时序 Val（不覆盖主产物）
 

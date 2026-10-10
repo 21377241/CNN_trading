@@ -62,6 +62,8 @@ logs/
 WORK_SPACE/*
 !WORK_SPACE/README.md
 CSI800_volume_price/
+references/
+_local/
 *.rar
 *.zip
 *.pdf

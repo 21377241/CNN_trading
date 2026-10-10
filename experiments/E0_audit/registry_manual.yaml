@@ -121,32 +121,32 @@ models:
 
 # Paper tables / reports -> source files. Used to explain number discrepancies in E0_reconciliation.md.
 reports:
-  - doc: docs/paper_results_E2.md and docs/paper_research_framework.md (E2 main table)
+  - doc: docs/results/paper_results_E2.md and docs/framework/paper_research_framework.md (E2 main table)
     files: [chartcnn_e1b_ric, histgb_180, mlp2_180_bag10, logit_180]
     script: experiments/E2_matched_tabular/run_eval.py
     summary: WORK_SPACE/paper/E2_matched_is_ind_chrono_ric/e2_summary.csv
-  - doc: docs/mlp4_propagation_audit.md (MLP-4 replacement of E2B-E5)
+  - doc: docs/results/mlp4_propagation_audit.md (MLP-4 replacement of E2B-E5)
     files: [chartcnn_e1b_ric, mlp4_180_bag10]
     summary: WORK_SPACE/paper/E2_matched_is_ind_chrono_ric_mlp4/e2_summary.csv
-  - doc: docs/paper_E2C_temporal_numerical_benchmark_report.md
+  - doc: docs/results/paper_E2C_temporal_numerical_benchmark_report.md
     files: [chartcnn_e1b_ric, onedcnn_120]
     script: experiments/E2C_temporal/eval_e2c.py
-  - doc: docs/paper_E2F_mlp_depth_robustness.md
+  - doc: docs/results/paper_E2F_mlp_depth_robustness.md
     files: [mlp2_120_s5, mlp3_120_s5, mlp4_120_s5, mlp5_120_s5]
     summary: WORK_SPACE/paper/E2F_mlp_depth/e2f_depth_summary.csv
-  - doc: docs/paper_E2D_liquidity_implementability_audit.md
+  - doc: docs/archive/superseded/paper_E2D_liquidity_implementability_audit.md
     files: [e2_chrono_120_legacy, onedcnn_120]
     script: experiments/E2D_liquidity/run_e2d_audit.py
-  - doc: docs/paper_results_E2G.md
-    files: [chartcnn_e1b_ric, onedcnn_120, mlp4_180_bag10]
+  - doc: docs/results/paper_results_E2G.md
+    files: [chartcnn_e1b_ric, onedcnn_120, mlp4_120_s5]
     script: experiments/E2G_chart_capacity/eval_e2g.py
-    note: benchmark labelled mlp4_120 actually used the 180D bag-10 MLP-4 file
-  - doc: docs/paper_results_E3.md, docs/paper_results_E4.md, docs/paper_results_E5.md
+    note: before the E0 correction the mlp4_120 benchmark pointed to the 180D bag-10 MLP-4 file
+  - doc: docs/results/paper_results_E3.md, docs/results/paper_results_E4.md, docs/results/paper_results_E5.md
     files: [chartcnn_e1b_ric, mlp2_180_bag10, histgb_180]
     panel: WORK_SPACE/paper/E3_shared_specific_chrono_ric/scores.parquet
   - doc: E3/E4/E5 *_mlp4 replacement runs
     files: [chartcnn_e1b_ric, mlp4_180_bag10, histgb_180]
     panel: WORK_SPACE/paper/E3_shared_specific_chrono_ric_mlp4/scores.parquet
-  - doc: docs/paper_E3T_cnn_1d_temporal_decomposition.md, paper_E4T*, paper_E5T*
+  - doc: docs/results/paper_E3T_cnn_1d_temporal_decomposition.md, paper_E4T*, paper_E5T*
     files: [chartcnn_e1b_ric, onedcnn_120]
     panel: WORK_SPACE/paper/E3T_cnn_1d_temporal/scores.parquet

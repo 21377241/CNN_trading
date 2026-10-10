@@ -72,8 +72,8 @@ def main():
 
     # 同步摘要到 docs
     src = os.path.join(PAPER_EXP_DIR_E1, 'portfolio', 'portfolio_summary.txt')
-    dst = os.path.join(PAPER_DOCS_DIR, 'paper_results_E1.md')
-    os.makedirs(PAPER_DOCS_DIR, exist_ok=True)
+    dst = os.path.join(PAPER_DOCS_DIR, 'results', 'paper_results_E1.md')
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
     if os.path.exists(src):
         with open(src, 'r', encoding='utf-8') as f:
             body = f.read()

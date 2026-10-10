@@ -4,7 +4,35 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from scipy import stats
 from scipy.stats import spearmanr, pearsonr
+
+
+def newey_west_t(x: np.ndarray, lag: int = 4) -> tuple[float, float]:
+    """Newey-West (Bartlett) t-statistic and two-sided p-value for the mean of a time series."""
+    x = np.asarray(x, dtype=float)
+    x = x[np.isfinite(x)]
+    T = len(x)
+    if T < 5:
+        return float('nan'), float('nan')
+    mu = x.mean()
+    var = np.mean((x - mu) ** 2)
+    for L in range(1, min(lag, T - 1) + 1):
+        var += 2 * (1.0 - L / (lag + 1)) * np.mean((x[L:] - mu) * (x[:-L] - mu))
+    se = np.sqrt(max(var, 0.0) / T)
+    if se < 1e-15:
+        return float('nan'), float('nan')
+    t = mu / se
+    return float(t), float(2 * (1 - stats.t.cdf(abs(t), df=T - 1)))
+
+
+def annualized_sharpe(r: np.ndarray, periods: int = 52) -> float:
+    """Frozen convention (docs/protocol/sharpe_convention.md): mean * sqrt(periods) / std (ddof=1)."""
+    r = np.asarray(r, dtype=float)
+    r = r[np.isfinite(r)]
+    if len(r) < 2 or r.std(ddof=1) < 1e-15:
+        return float('nan')
+    return float(r.mean() / r.std(ddof=1) * np.sqrt(periods))
 
 
 def cross_section_ic(df: pd.DataFrame, score_col: str, ret_col: str = 'ret_val') -> pd.DataFrame:

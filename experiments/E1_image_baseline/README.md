@@ -9,14 +9,14 @@
 | 模型 | CNN `D20…C256`，5 ensembles |
 | 预测 | `WORK_SPACE/ashare_model_res_I20R5/**/ensem_res/ensem5_res_YYYY.csv` |
 | 回测 | EW H-L Sharpe ≈ **2.65** |
-| 报告 | `docs/ashare_paper_repro_report.md` |
+| 报告 | `docs/repro/ashare_paper_repro_report.md` |
 
 E2 只**读取**上述 OOS `up_prob`，不修改该目录。
 
 ## E1b：A 股 CNN 超参本地化（chrono val）
 
-- 设计：[`docs/paper_cnn_hp_design.md`](../../docs/paper_cnn_hp_design.md)
-- 结果：[`docs/paper_results_E1b.md`](../../docs/paper_results_E1b.md)
+- 设计：[`docs/design/paper_cnn_hp_design.md`](../../docs/design/paper_cnn_hp_design.md)
+- 结果：[`docs/results/paper_results_E1b.md`](../../docs/results/paper_results_E1b.md)
 - 配置：[`config_cnn_hp.yaml`](config_cnn_hp.yaml)
 - 产物：`WORK_SPACE/paper/E1b_cnn_hp_I20R5/`（不覆盖 `ashare_model_res_I20R5/`）
 

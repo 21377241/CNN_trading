@@ -123,7 +123,7 @@
 ### 6.1 Fama–MacBeth
 
 - 系数为周度截面系数的均值。
-- 标准误用 Newey–West，lag = 4（`experiments/E3_shared_specific/utils.py` 中的 `newey_west_t`）。
+- 标准误用 Newey–West，lag = 4（`experiments/common/metrics.py` 中的 `newey_west_t`，与 `E3_shared_specific/utils.py` 的实现逐位一致）。
 - 报告 t 值、95% 置信区间、观测数、周数和平均调整 R²。
 - **增量 R²**：每周计算 R²(M1(k)) − R²(M0-AB)，报告均值及其 NW t。M2 相对于 M1(chart) 和 M1(1d) 同样计算。
 - **经济量级**：β × 52 即为年化收益差。
@@ -143,7 +143,7 @@
   2. 组内再按 score_k 分成 10 组；
   3. 计算 EW 的 H-L（第 10 组减第 1 组）收益，并在 5 个条件组之间取平均；
   4. 同时报告每个条件组内的 H-L。
-- 推断：NW t（lag 4），Sharpe 按 √52 年化（见 `docs/sharpe_convention.md`）。
+- 推断：NW t（lag 4），Sharpe 按 √52 年化（见 `docs/protocol/sharpe_convention.md`）。
 
 ### 6.4 输出文件
 
@@ -217,7 +217,7 @@
 
 | 日期 | 改动 | 原因 | 是否在看到 E7 结果之后 |
 |---|---|---|---|
-| — | — | — | — |
+| 2026-10-11 | 文档目录整理后更新引用路径；Newey–West 函数改从 `experiments/common/metrics.py` 调用 | 项目结构整理，非实质性改动，不影响任何定义或判定规则 | 否（E7 尚未运行） |
 
 ## 12. 实施文件（E7 阶段创建）
 

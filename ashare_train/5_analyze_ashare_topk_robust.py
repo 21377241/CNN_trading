@@ -269,7 +269,7 @@ def main():
     if all_sum.empty:
         return 1
 
-    docs = os.path.join(PROJECT_ROOT, 'docs')
+    docs = os.path.join(PROJECT_ROOT, 'docs', 'repro')
     os.makedirs(docs, exist_ok=True)
     csv_path = os.path.join(docs, 'ashare_topk_robust_summary.csv')
     if os.path.exists(csv_path) and args.spec not in ('both', 'all'):

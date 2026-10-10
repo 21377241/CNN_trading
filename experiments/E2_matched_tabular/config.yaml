@@ -15,7 +15,7 @@ paths:
   labels_glob: WORK_SPACE/data/ashare_stocks_dataset/I20R5/stocks_CHN/dataset_all/20d_week_has_vb_[20]_ma_{year}_labels.feather
   ensem_root: WORK_SPACE/ashare_model_res_I20R5
   out_root: WORK_SPACE/paper/E2_matched_is
-  # 自动汇总写到 out_root；统一结论见 docs/paper_results_E2.md
+  # 自动汇总写到 out_root；统一结论见 docs/results/paper_results_E2.md
   results_md: null
 
 # HistGB (Bøjstrup Component Spec) + IS-val grid around paper defaults.

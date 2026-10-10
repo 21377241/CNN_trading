@@ -222,7 +222,7 @@ def main(argv=None):
     lines = [
         '# E2 自动汇总（勿作唯一结论稿）',
         '',
-        f'- 统一结论请见 `docs/paper_results_E2.md`',
+        f'- 统一结论请见 `docs/results/paper_results_E2.md`',
         f'- 切分：{split_desc}',
         f'- 特征：{feat_desc}',
         '- Logit：`SGDClassifier`；`logit` = IS-val 网格；`logit_paper` = 原文默认',
