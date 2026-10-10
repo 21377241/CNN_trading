@@ -1,0 +1,15 @@
+\section{Matched-information Benchmark}
+
+Table~\ref{tab:benchmark} reports the initial matched-information benchmark. The CNN is clearly predictive and substantially outperforms the linear Logit baseline. However, it does not dominate strong nonlinear tabular models. HistGB-120 attains a higher equal-weighted high-minus-low Sharpe than the CNN, while the validation-selected MLP-4-120 is stronger than either CNN or HistGB in this flattened tabular comparison.
+
+\input{tables/benchmark}
+
+This result changes the interpretation of chart-image models. A CNN can extract useful price-history signals, but image rendering is not necessary for strong return predictability. The stronger conclusion is that nonlinear extraction matters. Once a sufficiently flexible tabular learner is stabilized, much of the apparent chart-image advantage disappears. Section~\ref{sec:temporal_benchmark} pushes this point further by replacing flattened tabular inputs with an explicit temporal numerical architecture.
+
+The flattened MLP benchmark uses the validation-selected four-hidden-layer architecture from the depth-robustness exercise reported below. The CNN benchmark is not presented as a full architecture optimization. We retain the literature-based CNN architecture and conduct targeted market-specific tuning over learning rate, dropout, and early-stopping patience using the 2006--2007 validation period. The 2008--2025 OOS sample is never used for hyperparameter selection. Rank IC is adopted as the primary validation criterion because it is more closely aligned with the paper's cross-sectional ranking objective; in the realized OOS sample, the Rank-IC-selected specification also performs better than the MCC-selected alternative.
+
+\subsection{MLP Stabilization}
+
+A single-seed MLP is sensitive to training randomness. We therefore use five-seed ensembles and select depth by chronological validation Rank IC; the 120D depth comparison selects MLP-4.
+
+\input{tables/mlp_stability}

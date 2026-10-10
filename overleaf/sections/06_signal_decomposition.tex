@@ -1,0 +1,15 @@
+\section{Shared and Model-specific Signals}
+
+We use two distinct residual decompositions, which answer different questions and are not interchangeable. The first is a \emph{three-model residual decomposition} over CNN, MLP-4, and HistGB: the shared component captures common variation across all three scores, while each model-specific component is its residual predictive content after controlling for the other two. The second, introduced below, is a \emph{pairwise temporal residual decomposition} over CNN and 1D-CNN only. We reserve ``CNN-specific'' and ``MLP-4-specific'' without a conditioning qualifier for the former, and use ``CNN-specific conditional on 1D-CNN'' and ``1D-CNN-specific conditional on CNN'' for the latter.
+
+\input{tables/shared_specific}
+
+The shared signal is the strongest component, with an equal-weighted high-minus-low Sharpe of 3.09 under the standard arithmetic Sharpe convention. This suggests that different nonlinear learners agree on a robust core price-history signal. The MLP-4-specific component remains strong, with Sharpe 1.88, while the CNN-specific component is positive and economically meaningful, with Sharpe 1.08. The HistGB-specific component is weak once MLP-4 is included, suggesting that the stronger flattened learner absorbs much of HistGB's distinct tabular signal.
+
+The three-model decomposition refines the paper's main claim. The relevant contrast is not image versus table in the abstract. It is shared nonlinear price-history predictability plus model-specific residual signals. In this three-model specification, the main components worth interpreting are CNN-specific and MLP-4-specific.
+
+\subsection{Pairwise Temporal Decomposition}
+
+The temporal benchmark permits a sharper pairwise test with a different estimand. Table~\ref{tab:temporal_decomposition} shows that the 1D-CNN-specific component conditional on CNN retains most of its predictive content: its residual Rank IC is 0.0388 and its EW H--L Sharpe is 2.77. The CNN-specific component conditional on 1D-CNN is smaller but remains positive and statistically significant, with Rank IC 0.0153, Newey--West $t=6.60$, and Sharpe 0.81. Thus, temporal convolution absorbs much of the CNN-versus-flattened-model residual but does not fully span chart-image learning.
+
+\input{tables/temporal_decomposition}

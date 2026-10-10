@@ -1,0 +1,19 @@
+\begin{table}[htbp]
+\centering
+\caption{MLP depth robustness and specification selection}
+\label{tab:mlp_stability}
+\begin{tabular}{lrr}
+\toprule
+MLP specification (120D, five-seed ensemble) & Validation Rank IC & OOS Rank IC \\
+\midrule
+MLP-2 ($128\rightarrow64$) & 0.0705 & 0.0354 \\
+MLP-3 ($128\rightarrow64\rightarrow32$) & 0.0691 & 0.0399 \\
+MLP-4 ($128\rightarrow64\rightarrow32\rightarrow16$) & 0.0759 & 0.0410 \\
+MLP-5 ($128\rightarrow64\rightarrow32\rightarrow16\rightarrow8$) & 0.0737 & 0.0411 \\
+\bottomrule
+\end{tabular}
+\begin{minipage}{0.92\linewidth}
+\footnotesize
+\textit{Notes:} Architecture selection uses five-seed ensemble validation Rank IC from the 2006--2007 chronological validation period. MLP-4 is therefore the validation-selected flattened nonlinear benchmark; its 180D main result is reported in Table~\ref{tab:shared_specific}.
+\end{minipage}
+\end{table}

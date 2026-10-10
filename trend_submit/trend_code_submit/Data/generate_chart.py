@@ -61,7 +61,8 @@ class GenerateStockData:
                  volume_bar: bool = True,
                  need_adjust_price: bool = True,
                  chart_type: str = 'bar',
-                 ret_col: str = None):
+                 ret_col: str = None,
+                 dataset_dir: str = None):
 
         self.country = country
         self.year = year
@@ -84,8 +85,8 @@ class GenerateStockData:
         self.img_h = IMAGE_HEIGHT.get(window_size, 64)
         self.img_size = self.img_w * self.img_h
 
-        # 输出目录
-        self.dataset_dir = get_dataset_dir(country)
+        # 输出目录（可由外部传入以支持不同数据集路径）
+        self.dataset_dir = dataset_dir if dataset_dir is not None else get_dataset_dir(country)
         os.makedirs(self.dataset_dir, exist_ok=True)
 
         # 加载数据

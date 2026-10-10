@@ -1,0 +1,38 @@
+\section{Implementation and Reporting Details}
+\label{sec:implementation}
+
+\subsection{China Transfer Mapping}
+
+The chart-CNN transfer follows \citet{jiang2023reimagining} in spirit but adapts the data source and market-specific filters to China A-shares. The aligned components are: grayscale chart images from OHLCV histories, five-model CNN ensembles, Xavier initialization, chart-window specifications I20/R20, I5/R5, and I20/R5, and decile high-minus-low portfolio evaluation. The market adaptations are: A-share adjusted OHLC prices, exclusion of ST stocks where applicable, value-weighting by free-float market capitalization, return clipping for limit-move robustness, and the 2000--2007 in-sample / 2008--2025 out-of-sample split.
+
+\subsection{Chronological Splits}
+
+The main matched-information experiments use a chronological protocol. Earlier years are used for training and validation, and all reported model comparisons are evaluated on the common 2008--2025 OOS panel. The principal tabular benchmark uses validation Rank IC for hyperparameter selection. Random-validation results are retained as protocol-sensitivity checks rather than main evidence.
+
+\subsection{CNN Hyperparameter Localization and Selection}
+
+The CNN architecture is intentionally held close to the literature benchmark rather than exhaustively optimized. We conduct a targeted market-specific search over training hyperparameters using the chronological 2006--2007 validation period. The search space is $\mathrm{lr}\in\{3\times10^{-6},10^{-5},3\times10^{-5},10^{-4}\}$, dropout $\in\{0.4,0.5,0.6\}$, and early-stopping patience $\in\{2,5\}$. Batch size (128), maximum epochs (50), optimizer family, image architecture, initialization, and convolutional layout are fixed. The final CNN specification uses a five-model ensemble. The Jiang anchor is $(\mathrm{lr}=10^{-5},\mathrm{dropout}=0.5,\mathrm{patience}=2)$.
+
+\input{tables/cnn_hp_localization}
+
+The table is a selection diagnostic rather than a claim of near-optimal CNN performance. In particular, the architecture itself is not searched. The Rank-IC-selected row is preferred because its validation criterion matches the paper's cross-sectional ranking objective; its stronger realized OOS portfolio performance is reported as an outcome, not as evidence that the OOS sample was used for selection.
+
+\subsection{Inference}
+
+Rank IC is computed each date as the cross-sectional Spearman correlation between model score and future return, then averaged over time. Reported $t$-statistics use Newey--West standard errors with lag 4 unless otherwise noted. Fama--MacBeth tests run daily cross-sectional regressions and then test the time-series mean of the coefficients.
+
+\subsection{Shared and Specific Scores}
+
+The shared score is the average of daily cross-sectional standardized CNN, MLP, and HistGB scores. A model-specific score is the daily residual from projecting that model's raw score on the other two model scores with an intercept. Portfolio tests rank the resulting shared or specific score within each date and form decile high-minus-low portfolios.
+
+\subsection{Intervention Interpretation}
+
+The recent-path interventions are sensitivity tests, not causal sufficiency tests. CNN interventions modify the OHLCV path and redraw the chart before forward prediction. MLP interventions remove or alter matched tabular feature blocks and retrain under the fixed protocol. Because these operations are not mechanically identical across model classes, the main object of interpretation is the relative sensitivity profile rather than any single cell estimate.
+
+\subsection{Temporal Numerical Benchmark}
+
+The E2C temporal benchmark uses the 120D matched-information feature matrix and reshapes each observation into a $20\times 6$ sequence. The six daily variables are the matched OHLCV-derived inputs used in the flattened benchmark. The 1D-CNN contains two temporal convolution layers with 32 and 64 channels, kernel size 3, ReLU activations, global average pooling, dropout, and a linear output. Training uses five seeds, chronological train-validation splitting, validation Rank IC for early stopping, and the common 2008--2025 OOS panel. The implementation is in \texttt{experiments/E2C\_temporal/}. The main output report is stored under the E2C temporal results directory in \texttt{WORK\_SPACE/paper/}.
+
+\subsection{Unreported but Needed for a Full Working Paper}
+
+The current draft should be extended with yearly stability tables, turnover and transaction-cost analysis, full hyperparameter grids, and richer temporal robustness checks described in Section~\ref{sec:remaining_benchmark}.

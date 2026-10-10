@@ -1,0 +1,42 @@
+# E2G: parameter-count-matched chart-CNN control. No OOS selection is permitted.
+spec: I20R5
+image_shape: [1, 64, 60]
+window_size: 20
+label_horizon_days: 5
+
+splits:
+  train_years: [2000, 2001, 2002, 2003, 2004, 2005]
+  validation_years: [2006, 2007]
+  oos_years: [2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
+
+# Widths are selected mechanically from [k, 2k, 4k] over integer k=1,...,64.
+# The target is trainable parameter count, not FLOPs or full functional-class equivalence.
+architectures:
+  chartcnn_s:
+    target_model: 1dcnn_120
+    target_parameters: 7073
+    width_rule: proportional_integer_nearest
+    channels: [4, 8, 16]
+    expected_parameters: 8306
+  chartcnn_m:
+    target_model: mlp4_120
+    target_parameters: 26369
+    width_rule: proportional_integer_nearest
+    channels: [9, 18, 36]
+    expected_parameters: 25436
+
+# Same targeted chart-CNN localization budget for each width-scaled architecture.
+hyperparameter_search:
+  metric: validation_rank_ic
+  learning_rate: [3.0e-6, 1.0e-5, 3.0e-5, 1.0e-4]
+  dropout: [0.40, 0.50, 0.60]
+  patience: [2, 5]
+  phase1_seeds: [42]
+  final_seeds: [42, 43, 44, 45, 46]
+  max_epochs: 50
+  batch_size: 128
+
+diagnostics:
+  save_epoch_history: true
+  report_parameter_breakdown: true
+  report_train_validation_gap: true

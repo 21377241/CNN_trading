@@ -1,0 +1,16 @@
+\begin{table}[htbp]
+\centering
+\caption{Pairwise CNN--1D-CNN shared and specific signals}
+\label{tab:temporal_decomposition}
+\begin{tabular}{lrrrr}
+\toprule
+Component & Rank IC & NW $t$ & EW H--L Sharpe & VW H--L Sharpe \\
+\midrule
+Shared CNN--1D score & 0.0473 & 14.50 & 3.4613 & 1.7143 \\
+CNN-specific conditional on 1D-CNN & 0.0153 & 6.60 & 0.8111 & 0.4263 \\
+1D-CNN-specific conditional on CNN & 0.0388 & 11.42 & 2.7674 & 1.4320 \\
+\bottomrule
+\end{tabular}
+\vspace{0.25em}
+\footnotesize\textit{Notes:} Shared is the mean of daily standardized scores; specific scores are daily linear residuals. This pairwise design differs from the CNN--MLP-4--HistGB decomposition in Table~\ref{tab:shared_specific}. Sharpe uses weekly decile H--L returns and $\sqrt{52}$ annualization.
+\end{table}

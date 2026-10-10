@@ -1,0 +1,20 @@
+\section{Economic Realization}
+
+We finally examine how residual signals are realized in future returns. The goal is not to prove a single causal mechanism, but to characterize horizon and state dependence. The first set of tables concerns the three-model CNN--MLP-4--HistGB decomposition; the final subsection separately reports pairwise temporal CNN--1D-CNN residuals.
+
+\input{tables/mechanism_summary}
+\input{tables/mechanism_pressure}
+\input{tables/mechanism_interaction}
+\input{tables/mechanism_direction}
+
+In the three-model decomposition, CNN-specific predictability is short-lived. It is strongest at the next-day horizon and decays quickly. It is also amplified in pressure-like states, especially when turnover and recent-path stress are high. In Fama--MacBeth specifications, interactions between CNN-specific scores and pressure states are positive and significant. The signal is more rebound-leaning or mixed than pure continuation.
+
+In the three-model decomposition, MLP-4-specific predictability is more persistent. It remains strong through days two to five and is amplified by turnover, recent momentum, and volatility. Its five-day spread is larger following positive recent returns, consistent with continuation. T+1-adjacent and price-limit state tests are suggestive rather than causal: they are useful for screening whether institutional frictions are state-consistent with the signal, but they do not prove that such frictions generate the alpha.
+
+Within the three-model decomposition, the economic interpretation is therefore asymmetric. The CNN-specific signal resembles a short-window path-pressure signal with rebound-like elements, while the MLP-4-specific signal resembles a more persistent continuation signal. This distinction supports the broader claim that different nonlinear model classes extract different economically relevant structures from the same price history.
+
+\subsection{CNN versus Temporal CNN}
+
+Table~\ref{tab:temporal_mechanism} provides the parallel E5T test for \emph{pairwise temporal} CNN--1D-CNN residuals. The CNN-specific component conditional on 1D-CNN is concentrated at the next-day horizon and decays over longer windows. In contrast, the 1D-CNN-specific component conditional on CNN increases from an $r_1$ Rank IC of 0.0137 to 0.0407 over $R_{1:5}$ and 0.0428 over $R_{1:10}$. The latter residual is substantially stronger in high-pressure states and remains positive in both negative and positive recent-return groups. The pairwise CNN-specific residual has much smaller medium-horizon spreads and is relatively stronger after negative recent returns. Price-limit and T+1-state results remain exploratory because such states are sparse.
+
+\input{tables/temporal_mechanism}

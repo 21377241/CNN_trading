@@ -1,0 +1,29 @@
+\section{Recent-path Decomposition}
+
+This section translates residual signals into price-path structures. Its first three subsections use the three-model CNN--MLP-4--HistGB decomposition defined in Section 6; hence unqualified CNN-specific and MLP-4-specific refer only to that estimand. The final subsection separately analyzes the pairwise temporal CNN--1D-CNN residuals and labels each component with its conditioning model.
+
+\subsection{Lag Sensitivity}
+
+Intervening on individual days in the most recent five-day window reveals sharp differences in the three-model components. The CNN-specific signal is highly sensitive to particular near-end lags, especially $t-1$, $t$, and $t-3$. In contrast, removing individual tabular days does not reduce the MLP-4-specific Sharpe, indicating that its signal is not concentrated in a single recent observation.
+
+\input{tables/recent_lag}
+
+\subsection{Path Shape Beyond Recent Return}
+
+Controlling for cumulative five-day return does not eliminate path-shape explanatory power. Variables such as maximum drawdown, path volatility, late-versus-early return, reversal, and monotonicity add substantial explanatory power for specific scores. The three-model CNN-specific component loads more on drawdown and path-volatility structures, while the MLP-4-specific component is more closely aligned with monotonicity and continuation-like geometry.
+
+\input{tables/recent_pathshape}
+
+\subsection{Component Sensitivity}
+
+Matched interventions show that the CNN-specific signal is most sensitive to volume removal. MLP-4-specific performance is not reduced by any single engineered component block, reinforcing the interpretation that its signal is distributed across tabular geometry rather than tied to one component.
+
+\input{tables/recent_blocks}
+
+Overall, the specific signals are not reducible to a simple recent-return effect. They represent different ways of parsing the same recent price path.
+
+\subsection{CNN versus Temporal CNN}
+
+The temporal benchmark makes the mechanism comparison more stringent because both models impose local convolutional structure on the same 20-day history. Table~\ref{tab:temporal_recent_path} reports the parallel E4T analysis using the \emph{pairwise temporal} residuals, not the three-model components above. For both pairwise residuals, adding recent-path shape variables beyond CumRet5 materially increases daily cross-sectional explanatory power. The CNN-specific component conditional on 1D-CNN is especially sensitive to $t-1$, $t-3$, and volume removal. The 1D-CNN-specific component conditional on CNN is instead most sensitive to removal of the recent return path, which reduces its Sharpe by 1.01. These are intervention-based model-sensitivity results, not causal effects of individual chart variables, but they show that residual disagreement is not merely a difference in the strength of one temporal signal.
+
+\input{tables/temporal_recent_path}

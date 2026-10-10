@@ -1,0 +1,15 @@
+\section{Complementarity Across Models}
+
+Weak single-model dominance does not imply that models learn the same signal. We therefore test whether CNN, HistGB, and MLP predictions contain incremental information relative to one another.
+
+\input{tables/complementarity}
+\input{tables/complementarity_fm}
+\input{tables/complementarity_residual}
+
+For CNN versus HistGB, the daily cross-sectional score correlation is about 0.37 and top-decile overlap is about 26\%. The overlap is higher than random but far from complete. Fama--MacBeth regressions and conditional double sorts indicate two-way incremental predictive content.
+
+For CNN versus the validation-selected MLP-4 Bag10 benchmark, the score correlation is 0.338 and top-decile overlap is 23\%. In joint Fama--MacBeth regressions, both scores retain positive coefficients: the CNN coefficient conditional on MLP-4 is 0.00071 ($t=5.75$), while the MLP-4 coefficient conditional on CNN is 0.00149 ($t=10.85$). Thus, the stronger flattened learner does not eliminate CNN-specific information.
+
+These results motivate a decomposition of predictions into shared and model-specific components. Similar input data and similar average performance do not imply that models learn identical economic signals.
+
+The next section asks whether this conclusion survives a stronger numerical comparison that preserves the time ordering of the 20-day OHLCV sequence.

@@ -1,0 +1,60 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{natbib}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  citecolor=blue,
+  urlcolor=blue
+}
+
+\title{Same Information, Distinct Signals:\\
+Nonlinear Representations of Price History in China A-shares}
+
+\author{
+  Author Name\thanks{Affiliation and contact information to be added.}
+}
+
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\input{sections/00_abstract}
+\end{abstract}
+
+\noindent\textbf{Keywords:} return prediction, technical analysis, chart images, nonlinear models, China A-shares, machine learning
+
+\noindent\textbf{JEL Codes:} G12, G14, G17, C45
+
+\newpage
+
+\input{sections/01_introduction}
+\input{sections/02_data_design}
+\input{sections/02b_transfer_validation}
+\input{sections/03_benchmark}
+\input{sections/04_accessibility}
+\input{sections/05_complementarity}
+\input{sections/05b_temporal_benchmark}
+\input{sections/06_signal_decomposition}
+\input{sections/07_recent_path}
+\input{sections/08_economic_mechanism}
+\input{sections/08b_scope_and_robustness}
+\input{sections/09_conclusion}
+
+\bibliographystyle{apalike}
+\bibliography{references}
+
+\appendix
+\input{sections/a_appendix}
+
+\end{document}

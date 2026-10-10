@@ -1,0 +1,18 @@
+\begin{table}[htbp]
+\centering
+\caption{CNN hyperparameter localization and selection}
+\label{tab:cnn_hp_localization}
+\begin{tabular}{lrrrrr}
+\toprule
+Specification & Learning rate & Dropout & Patience & Validation criterion & E1b OOS EW H--L Sharpe \\
+\midrule
+Jiang anchor & $1\times10^{-5}$ & 0.50 & 2 & Rank IC & 2.38 \\
+MCC-selected & $3\times10^{-5}$ & 0.60 & 5 & MCC & 2.37 \\
+Rank-IC-selected & $1\times10^{-4}$ & 0.50 & 5 & Rank IC & 2.65 \\
+\bottomrule
+\end{tabular}
+\begin{minipage}{0.94\linewidth}
+\footnotesize
+\textit{Notes:} The table summarizes the E1b localization audit. Validation uses the 2006--2007 chronological period; OOS covers 2008--2025. The E1b OOS column is reported for realized comparison only and is not used for selection; it is not the current matched-panel benchmark table. The CNN architecture, batch size, and maximum epoch count are fixed as described in Appendix~\ref{sec:implementation}.
+\end{minipage}
+\end{table}

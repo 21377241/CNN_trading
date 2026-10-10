@@ -1,0 +1,21 @@
+\begin{table}[htbp]
+\centering
+\caption{Matched component sensitivity}
+\label{tab:recent_blocks}
+\begin{tabular}{lrrrr}
+\toprule
+Component & CNN $\Delta$Sharpe & CNN drop & MLP $\Delta$Sharpe & MLP drop \\
+\midrule
+Volume & 0.36 & 28\% & -0.26 & -12\% \\
+Wick & 0.07 & 5\% & -0.10 & -4\% \\
+Direction & 0.03 & 2\% & 0.09 & 4\% \\
+Return & 0.02 & 1\% & -0.28 & -13\% \\
+Gap & -0.25 & -19\% & -0.45 & -21\% \\
+Intraday & 0.07 & 5\% & -0.23 & -11\% \\
+\bottomrule
+\end{tabular}
+\begin{minipage}{0.92\linewidth}
+\footnotesize
+\textit{Notes:} Positive $\Delta$Sharpe means that removing the component reduces the specific-score Sharpe. Negative values indicate an improvement after removal.
+\end{minipage}
+\end{table}

@@ -1,0 +1,24 @@
+\section{Scope and Remaining Robustness}
+\label{sec:remaining_benchmark}
+
+\subsection{What the Current Design Identifies}
+
+The matched-information design holds the raw 20-day OHLCV history fixed across models. This supports three conclusions. First, image rendering is not necessary for strong return predictability: strong nonlinear numerical models match or exceed the chart CNN in single-model Sharpe. Second, the models do not learn the same ranking: correlations, top-decile overlaps, Fama--MacBeth controls, residualized scores, and ensembles all show economically meaningful complementarity. Third, residual signals have interpretable path and realization profiles. These profiles must be read with their conditioning set: the CNN--MLP-4--HistGB three-model residuals and the CNN--1D-CNN pairwise temporal residuals are separate estimands.
+
+The 1D-CNN benchmark resolves the most direct version of the temporal-inductive-bias concern. It shows that a local temporal numerical learner is a stronger standalone model than the chart CNN and absorbs a large share of the CNN residual relative to flattened MLPs. It also shows that absorption is incomplete: the CNN retains positive residual predictability and improves the temporal model in an ensemble. Remaining robustness should therefore focus on whether this partial spanning result is stable under richer temporal architectures and expanded numerical feature sets.
+
+\subsection{Trading-cost and Tradability Scope}
+
+The main long-short results are gross returns. The E2D audit provides an initial liquidity and cost-sensitivity check, but it is not a full price-impact or execution model. For MLP-4, the equal-weighted high-minus-low Sharpe remains 2.33 in the large-and-liquid universe, compared with 2.81 in the full universe. However, its mean one-way turnover is 0.89 and a 50-bps one-way turnover-proportional cost reduces the gross Sharpe to 0.72. Thus, headline estimates should not be read as capacity-free implementable returns.
+
+However, this is not a substitute for turnover-based cost adjustment. A full implementation should report portfolio turnover, cost-adjusted high-minus-low spreads under plausible A-share cost assumptions, and sensitivity to value-weighting or capacity constraints. Until then, the portfolio evidence should be interpreted primarily as economic signal strength rather than implementable net alpha.
+
+\subsection{Remaining Temporal Robustness}
+
+The next temporal robustness checks are:
+\begin{enumerate}
+  \item train a TCN on the same normalized OHLCV sequences using the same training, validation, and OOS years;
+  \item extend the 1D-CNN and TCN to the 180D feature set that includes engineered chart indicators;
+  \item report whether the CNN residual and CNN-plus-temporal ensemble gain remain positive under these stronger numerical benchmarks.
+\end{enumerate}
+If these richer temporal models fully absorb the chart-CNN residual, the paper's main conclusion should shift further toward temporal nonlinear inductive bias. If the residual remains significant, the evidence for image-specific complementarity becomes stronger.

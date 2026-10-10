@@ -1,0 +1,17 @@
+\begin{table}[htbp]
+\centering
+\caption{Recent-path mechanisms: pairwise CNN--1D-CNN specific signals}
+\label{tab:temporal_recent_path}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lrrrl}
+\toprule
+Component & $R^2$(CumRet5) & $R^2$(CumRet5 + shape) & $\Delta R^2$ & Main intervention sensitivity \\
+\midrule
+CNN-specific conditional on 1D-CNN & 0.0159 & 0.0792 & 0.0633 & $t-1$: 0.711; $t-3$: 0.600; volume: 0.202 \\
+1D-CNN-specific conditional on CNN & 0.0673 & 0.1352 & 0.0680 & return path: 1.006; $t-1$: 0.285 \\
+\bottomrule
+\end{tabular}%
+}
+\vspace{0.25em}
+\footnotesize\textit{Notes:} Shape variables are LateEarly, PathVol, UpCount5, MaxDD5, Reversal5, and Monotonicity. Intervention entries are reductions in EW H--L Sharpe. Each $\Delta R^2$ has Newey--West $t>43$.
+\end{table}

@@ -85,7 +85,15 @@ def get_dataset_filename(window_size: int, freq: str, has_vb: bool,
     return f"{window_size}d_{freq}_{vb_str}_{ma_str}_ma_{year}{suffix}"
 
 
-def get_dataset_dir(country: str = COUNTRY) -> str:
-    """返回数据集保存目录"""
-    return os.path.join(STOCKS_SAVEPATH, f'stocks_{country}', 'dataset_all')
+def get_dataset_dir(country: str = COUNTRY, base_savepath: str = None) -> str:
+    """
+    返回数据集保存目录。
+
+    Args:
+        country: 国家标识，如 'USA' 或 'CHN'
+        base_savepath: 根保存路径，默认使用 config.STOCKS_SAVEPATH（SPX路径）。
+                       CSI800 请传入 config.CSI800_STOCKS_SAVEPATH。
+    """
+    savepath = base_savepath if base_savepath is not None else STOCKS_SAVEPATH
+    return os.path.join(savepath, f'stocks_{country}', 'dataset_all')
 

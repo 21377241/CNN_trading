@@ -1,0 +1,469 @@
+﻿==== PAGE 2 ====
+3194 The Journal of Finance 庐
+price dynamics are in铿倁enced by human behavior and psychology , 1 it is plau-
+sible that prices contain subtle and complex patterns that can be dif铿乧ult to
+detect with the standard methods of empirical 铿乶ance. In this paper , we recon-
+sider price trend patterns from a machine learning perspective.
+Perhaps the most daunting challenge to a machine learning perspective on
+price-based return prediction is settling on a methodology to achieve a balance
+between two countervailing concerns. On the one hand, we prefer a method
+that is 铿俥xible enough to 铿乶d potentially complex predictive patterns. On the
+other hand, we prefer a method that is tractable and constrained enough that
+we can interpret those patterns to inform future theory .2 To negotiate this deli-
+cate trade-off, we make two research design choices that together result in suc-
+cessful inference of new return-predictive patterns in past prices: We represent
+historical prices as an image, and we model the predictive association between
+images and future returns using a convolutional neural network (CNN). These
+choices work together and enhance each other . We describe the logic behind
+each choice in turn, beginning with the CNN.
+The input to a CNN is typically an image, and in our setting the image is a
+plot of past market information (open, high, low , and close prices and trading
+volume) represented as a matrix of black and white pixel values. A CNN is
+designed to produce forecasts from an image without requiring a researcher to
+manually engineer predictive features. Instead, the CNN automates the fea-
+ture extraction process. In a given 鈥渓ayer ,鈥?the CNN spatially smooths image
+contents to reduce noise and accentuate shape con铿乬urations that correlate
+with future returns. This smoothing operation is applied recursively by stack-
+ing multiple layers together , which gives the CNN 铿俥xibility to capture poten-
+tially complex predictive patterns (and earns it the synonym 鈥渄eep learning鈥?.
+The 铿乶al predictor set consists of smoothed nonlinear transformations of the
+original numeric pixel values. At a high level, this is similar to more traditional
+kernel-based data 铿乴ters used in regression analysis. However , the CNN does
+not simply 铿亁 the set of smoothing 铿乴ters: Instead, it estimates the 铿乴ters that
+best detect shapes and other attributes of the images that are most predictive
+of the target variable. In short, we use a CNN due to its ability to automatically
+extract predictive signals from raw input data, which makes it ideally suited
+to elicit patterns that underly 铿乶ancial markets but may be too complex for a
+human to hypothesize.
+Why is it bene铿乧ial to encode market data as an image rather than in the
+more standard time-series numerical format? The 铿乺st reason is
+
+==== PAGE 9 ====
+(Re-)Imag(in)ing Price Trends 3201
+Figure 2. Generated OHLC images with volume bar and moving average line. This
+铿乬ure displays market data image for 60 days of data.
+II. The CNN Model
+In this section, we brie铿倅 describe the architecture of our CNN model spec-
+i铿乧ation and training approach. 6 We also discuss the rationale and bene铿乧ial
+aspects of representing time-series market data as an image for use in a CNN,
+rather than using a traditional time-series prediction model.
+A. A Brief Description of the CNN Architecture
+Each image in our data set is represented as a matrix of pixel values (0 or
+255 for black or white pixels). In principal, this matrix can be vectorized and
+treated as the input to a standard feed-forward neural network. There are a
+number of problems with this approach. First, generic unconstrained neural
+networks tend to be massively parameterized, and this problem is exacerbated
+by the large number of pixels in a typical image. The amount of data required
+to support such a 铿俥xible parameterization is unrealistic in many research
+problems, particularly in our application. Second, such a model would be in-
+herently sensitive to position, scale, and orientation of an object in the image.
+Moving the object from one corner of the image to another , or from foreground
+to the distance, would confuse such a model and severely limit its usefulness
+in forecasting.
+Instead, CNN is the workhorse model for constructing predictions based on
+raw image data. Its popularity stems from its success in resolving the two prob-
+lems above. The CNN imposes cross-parameter restrictions that dramatically
+reduce parameterization relative to standard feed-forward neural networks,
+making them more tractable to train and more effective in prediction with
+6 Chapter 9 in Goodfellow , Bengio, and Courville ( 2016) provides a textbook introduction
+to CNN.
+ 15406261, 2023, 6, Downloaded from https://onlinelibrary.wiley.com/doi/10.1111/jofi.13268 by Southampton University Hartley Library, Wiley Online Library on [07/02/2026]. See the Terms and Conditions (https://onlinelibrary.wiley.com/terms-and-conditions) on Wiley Online Library for rules of use; OA articles are governed by the applicable Creative Commons License
+
+
+==== PAGE 10 ====
+3202 The Journal of Finance 庐
+comparatively small data sets, and it embeds a number of tools that make
+the model resilient to deformation and repositioning of important objects in
+the image.
+The CNN modeling scheme stacks together a sequence of operations to trans-
+form a raw image into a set of predictive features and, ultimately , a prediction.
+Such schemes are inherently modular , using a single core building block that
+can be assembled in various con铿乬urations depending on the application at
+hand. A core building block consists of three operations: convolution, activa-
+tion, and pooling. Convolution works similarly to kernel smoothing. It scans
+horizontally and vertically through the image and, for each element in the
+image matrix, produces a summary of image contents in the immediately sur-
+rounding area. Activation is a nonlinear transformation (speci铿乧ally , 鈥渓eaky
+ReLU鈥? applied element-wise to the output of a convolution 铿乴ter . The last op-
+eration in a building block is 鈥渕ax-pooling,鈥?which again scans over the input
+matrix and returns the maximum value over surrounding areas in the image
+to reduce the dimension of the data and reduce noise. The 铿乶al CNN layer is
+fully connected and activated by a softmax function. The CNN targets a binary
+outcome equal to one for a positive return over the speci铿乪d forward horizon
+and zero otherwise. As a result, the 铿乼ted value from the CNN is an estimate
+for the probability of a positive outcome.
+We consider three main CNN speci铿乧ations with varying degrees of complex-
+ity . The architecture of each model is shown in Figure3. The Appendix provides
+further details about this CNN structure along with the intuition behind each
+of its components.
+B. Image Representation versus Time-Series Representation
+To understand our empirical design, it is useful to understand the CNN
+terms 鈥?D鈥?and 鈥?D.鈥?These describe the way that a CNN鈥檚 convolutional 铿乴ters
+move through the data. A black and white image is represented as a matrix
+with the value of each element corresponding to the shade of gray at the corre-
+sponding position of the image. Because its rectangular 铿乴ters move both hori-
+zontally and vertically through the image matrix, a standard image-processing
+CNN is said to be 鈥?D.鈥?Another common machine learning model is a CNN
+applied to time-series data. In this case, the data are again represented as a
+matrix with rows corresponding to time and columns to variables. Convolu-
+tional 铿乴ters in this setting have the same width as the data matrix, and the
+铿乴ter moves only through the time dimension. Such a CNN is therefore said to
+be 鈥?D.鈥?
+Our research design recommends embedding time-series data as an image
+before bringing it to predictive analysis. Why is it bene铿乧ial to work with im-
+ages rather than directly
+
+==== PAGE 13 ====
+(Re-)Imag(in)ing Price Trends 3205
+negative labels in our classi铿乧ation problem, which attenuates a potential bias
+in classi铿乧ation due to extended periods of bullish or bearish market swings.
+The resulting training and validation images have approximately 50% 鈥渦p鈥?
+and 50% 鈥渄own鈥?labels in all scenarios we consider . The remaining 19 years
+(2001 to 2019) of data comprise the out-of-sample test data set.
+We treat the prediction analysis as a classi铿乧ation problem. In particular , the
+label for an image is de铿乶ed as y = 1 if the subsequent return is positive and
+y = 0 otherwise. The training step minimizes the standard objective function
+for classi铿乧ation problems, a cross-entropy loss function. It is de铿乶ed as
+L(y, 藛y) =鈭?y log( 藛y) 鈭?(1 鈭?y)l o g ( 1鈭?藛y), (1)
+where 藛y is the softmax output from the 铿乶al step in the CNN. If the predicted
+probability exactly corresponds with the label, 藛y = y, then the loss function is
+zero, otherwise the loss is positive.
+We adopt the same regularization procedures in Gu, Kelly , and Xiu ( 2020)
+to combat over铿乼 and aid ef铿乧ient computation. We apply the Xavier initial-
+izer for weights in each layer (Glorot and Bengio ( 2010)). This promotes faster
+convergence by generating starting values for weights to ensure that predic-
+tion variance begins on a comparable scale to that of the labels. Loss func-
+tion optimization uses stochastic gradient descent and the Adam algorithm
+(Kingma and Ba ( 2014)) with initial learning rate of 1 脳 10鈭?5 and batch size
+of 128. We use a batch normalization (Ioffe and Szegedy ( 2015)) layer between
+the convolution and nonlinear activation within each building block to reduce
+covariate shift. 8 We apply 50% dropout (Srivastava et al. ( 2014)) to the fully
+connected layer (the relatively low parameterization in convolutional blocks
+avoids the need for dropout there). Finally , we use early stopping to halt train-
+ing once the validation sample loss function fails to improve for two consecutive
+epochs. Gu, Kelly , and Xiu (2020) outline the intuition behind these choices, so
+for the sake of brevity , we omit this discussion and refer interested readers
+there.
+In Section IV of the Internet Appendix , we report results of simulation ex-
+periments that investigate the 铿乶ite-sample performance of the CNN classi铿乪r .
+Since our images look rather different from standard CNN research data sets
+like ImageNet, the simulation evidence provides insights into the effectiveness
+of a CNN in this new environment. The general conclusion from the simula-
+tions is that the CNN successfully detects complicated technical patterns in
+realistically low signal-to-noise data sets.
+8 We also normalize all images using the mean and standard deviation of all pixel values from
+images in the training data, which are th
+
+==== PAGE 27 ====
+(Re-)Imag(in)ing Price Trends 3219
+E. Robustness
+Section I of the Internet Appendix reports a number of robustness analy-
+ses that support the main empirical 铿乶dings presented above. We show that
+image-based strategy returns are not explained by exposure to the market or
+to well-known price trend strategies. We therefore perform sensitivity analy-
+sis of the CNN prediction model to alternative choices in image representa-
+tion (e.g., excluding volume data or moving average price line or using mini-
+mal white pixels to represent the data), model architecture (e.g., varying the
+number of 铿乴ters in each layer or varying the number of layers), and estima-
+tion (e.g., using different dropout or batch normalization schemes). Finally , we
+compare CNN models to alternative computer vision models including 鈥淗OG鈥?
+and 鈥淗AAR鈥?(descriptions of these models are also included in the Internet
+Appendix).
+IV . What Does the CNN Learn?
+Interpreting a CNN is dif铿乧ult due to its recursive nonlinear structure. We
+attempt to interpret the predictive patterns identi铿乪d by the CNN using two
+approaches. First, we relate CNN 铿乼s to a collection of conceptually related
+(price, risk, and liquidity) signals widely studied in the literature. Second,
+we investigate regression-based logistic approximations to the CNN using the
+data underlying the CNN鈥檚 image input. Our attempts at interpretation are ad-
+mittedly incomplete (as in the CNN literature more broadly). Notwithstanding,
+they achieve partial success by offering some insight into the complex inner
+workings of the CNN model.
+A. Association with Other Predictors
+How unique are image-based forecasts compared to standard characteris-
+tics in the literature? We focus our comparison on measures of recent price
+trends (MOM, STR, WSTR, and distance from 52-week high), risk (beta and
+volatility), and liquidity (bid-ask spread, dollar volume, number of no-trade
+days, price delay , size, and Amihud illiquidity). 12 Table V reports univariate
+correlations between each of these characteristics and each image-based fore-
+cast. We estimate period-by-period cross-sectional correlations among cross-
+sectional ranks of each variable, then report the time-series average correla-
+tion during the test sample. Among the largest associations is WSTR, which
+has a correlation of 鈭?26% to 鈭?34% for models supervised by future 铿乿e-day
+returns, consistent with the CNN picking up on a weekly STR pattern. The
+WSTR correlation drops close to zero when CNN models are supervised by
+60-day returns. Similarly , MOM has its highest correlation (21%) with long-
+horizon forecasts from large images (I60/R60), but essentially zero correlation
+with short-horizon forecasts from small images (I5/R5). Image-based predic-
+tions from the CNN also resemble nonprice 铿乺m c
+
+==== PAGE 50 ====
+3242 The Journal of Finance 庐
+primarily visual mode of analysis. In light of this, our CNN model has po-
+tentially intriguing implications for economic modeling. If trading decisions
+implied by a statistical representation bene铿乼 from being more closely aligned
+with the formats in which investors intake their market perceptions for even-
+tual trading decisions, the CNN becomes more than a pure statistical tool and
+moves closer to a model of investor perception. Our ideal research agenda is
+to develop a model that can translate visual data into an optimal portfolio in
+a way that mimics human perceptions and decision processes. In this paper ,
+we take a 铿乺st modest step in this direction by extracting trading signals from
+price images using a CNN model.
+Market data images, when combined with a CNN, constitute a new and pow-
+erful tool for understanding market dynamics and forming ef铿乧ient portfolios.
+Y et, our analysis of images connects existing time-series analysis with ad hoc
+chart studies primarily for the purpose of technical trading. In light of this,
+our 铿乶dings highlight image analysis as a future research direction with great
+potential to improve our understanding of 铿乶ancial market phenomena.
+Initial submission: August 16, 2021; Accepted: July 1, 2022
+Editors: Stefan Nagel, Philip Bond, Amit Seru, and Wei Xiong
+Appendix: Architecture Details of the CNN
+A CNN is a modeling scheme that stacks a sequence of operations to trans-
+form a raw image into a set of predictive features and, ultimately , a prediction.
+They are inherently modular , using a single core building block that can be
+assembled in various con铿乬urations depending on the application at hand. A
+core building block consists of three operations: convolution, activation, and
+pooling.
+The 铿乺st operation in a CNN building block is 鈥渃onvolution.鈥?To understand
+convolution, consider the simpler operation of applying a kernel smoother to a
+time-series. For example, a rectangular kernel with a width of three smooths
+the time-series by scanning through observations, averaging each data point
+with its two neighbors. Convolution works similarly by scanning through the
+image and, for each element in the image matrix, producing a summary of
+image contents in the immediately surrounding area.
+More speci铿乧ally , the convolution operation uses a set of 鈥滐瑏lters.鈥?A 铿乴ter is
+a low-dimension kernel weighting matrix that, for each matrix element in the
+image, calculates the weighted average of the immediately adjacent matrix
+elements. Figure A1, Panel A, illustrates with a 6 脳6 image that is white in
+the 4脳4 upper-left corner and black elsewhere. Filter 1 is an example of a 3 脳3
+铿乴ter that takes the values of (1 , 0,鈭?1) in each row . For each interior element
+(i, j) of the image, the convolution opera
+
+==== PAGE 51 ====
+(Re-)Imag(in)ing Price Trends 3243
+Figure A1. Illustration of convolution and max-pooling operations. Panel A: The input
+tensor has size 6 脳 6 (with only one channel of gray-scale). There are two 3 脳 3 铿乴ters that detect
+edges. By construction, Filter 1 detects vertical edges and Filter 2 detects horizontal edges. When
+Filter 1 is applied to the yellow part of the input, the convolutional operation 铿乺st calculates the
+element-wise products between the 3 脳 3 yellow tensor and Filter 1 of the same size (solid red line)
+and then sums up the products and outputs a scalar (dotted red arrow) to the corresponding output
+location. As we can see from Output Channel 1, the right part of the output is activated by large
+values while the left part remains inactivated with all zeros, indicating that there is a vertical line
+on the right of the input image. Finally , 2 脳 2 max-pooling is applied to the output and shrinks
+the shape by half from 4 脳 4t o2 脳 2b yt a k i n gt h em a xo u to ft h e2脳 2 rolling window from the
+output. The 铿乶al output in Channel 1 has value 765 at the upper-right corner and value 510 at
+the bottom-right corner , extracting the information that there are vertical edges on the right and
+the vertical edge is sharper at the top than at the bottom. Filter 2 is applied in the same fashion
+(green dotted line and green dotted arrow), extracting the information that there are horizontal
+edges at the bottom of the image and the bottom-left (765) has a sharper change than the bottom-
+right (510). Panel B: This example shows that the introduction of the max-pooling layer adds
+robustness to noise. We take the same 6 脳 6 image from the example above and blur the borderline
+with gray color (pixel value 122). Take Filter 1, which detects vertical edges, for example. Nonzero
+values from Output Channel 1 are signi铿乧antly changed. However , after max-pooling is applied,
+the original upper-right value of 765 remains intact while the original bottom-right value of 510
+is replaced with 632, a slightly larger number , indicating a slightly stronger signal of the vertical
+line at the bottom than before. We observe a similar effect for Filter 2, which detects horizontal
+edges. (Color 铿乬ure can be viewed at wileyonlinelibrary .com)
+ 15406261, 2023, 6, Downloaded from https://onlinelibrary.wiley.com/doi/10.1111/jofi.13268 by Southampton University Hartley Library, Wiley Online Library on [07/02/2026]. See the Terms and Conditions (https://onlinelibrary.wiley.com/terms-and-conditions) on Wiley Online Library for rules of use; OA articles are governed by the applicable Creative Commons License
+
+
+==== PAGE 52 ====
+3244 The Journal of Finance 庐
+The example highlights the critical difference between convolution and 2D
+kernel smoothing. Smoothing calculates local averages in the image matrix,
+while convolution instead calculates a weighted sum of nearby image contents,
+where the 铿乴ter weights are parameters to be estimated. Through estimation,
+the CNN constructs 铿乴ters that emphasize aspects of images that are most
+predictive of the outcome of interest and blurs out uninformative content. The
+weight con铿乬uration in Filter 1, for example, is particularly useful for detect-
+ing vertical boundaries, while Filter 2 铿乶ds horizontal boundaries. Sliding the
+铿乴ter over the entire image amounts to searching the image for this speci铿乧
+pattern. If such a pattern exists in part of the input image, the corresponding
+output value will be large鈥攎eaning that the output neuron is stimulated and
+signals that a pattern is detected. As in our model below , it is common to use
+several 铿乴ters in a CNN, each specializing in certain patterns and thus each
+outputting a different set of features for use in the next layer of the model. It
+is also common for a CNN to use telescoping layers of 铿乴ters, with the output
+from the 铿乴ters in one layer of the CNN used as inputs for the subsequent layer
+to capture more complex patterns.
+We use a 铿乴ter size of 5 脳3 pixels in our baseline model. In addition, a convo-
+lution is 铿俥xible in 鈥渟tride鈥?of the 铿乴ter , which de铿乶es the number of horizontal
+or vertical steps the 铿乴ter takes as it moves through the image matrix. A larger
+stride corresponds to coarser convolution output. We use horizontal stride of
+one and vertical stride of three, meaning that the 铿乴ter slides across the im-
+age and recalculates the 铿乴ter output at every position in the row and jumps
+three rows at a time as it moves down the image vertically . We sometimes use
+a 鈥渄ilated鈥?铿乴ter to cover a larger neighborhood on the image than the size
+of the 铿乴ter . A dilated 铿乴ter with dilation rate k along the vertical or horizon-
+tal dimension (or both) expands the size of the original 铿乴ter by 铿乴ling ( k 鈭?1)
+zeros in between adjacent entries along the corresponding dimension(s). Our
+baseline model uses a vertical dilation of two and no horizontal dilation. 19
+Convolution endows the CNN with a number of attractive properties relative
+to more general neural networks connecting an N 脳 M input matrix to an N 脳
+M output. The CNN tightly constrains model parameterization by imposing
+two forms of (severe) cross-parameter restrictions. First, CNN applies a small
+铿乴ter uniformly to all locations in an image, while a general network allows
+separate weight parameters for each element of the image matrix. Second, the
+CNN maps the information from a given location in the input matrix only to
+the neighb
+
+==== PAGE 53 ====
+(Re-)Imag(in)ing Price Trends 3245
+sharing鈥?and 鈥渟parse interactions,鈥?are critical to the tractability and small-
+sample robustness of the CNN. Further , because the same 铿乴ters are applied
+uniformly to all locations in the image, they detect relevant objects regardless
+of their position (in other words, CNN forecasts are 鈥渢ranslation equivariant鈥?.
+The second operation in a building block is 鈥渁ctivation.鈥?This simple opera-
+tion is a nonlinear transformation applied element-wise to the output of a con-
+volution 铿乴ter . The activation function we use is 鈥渓eaky ReLU .鈥?This, roughly
+speaking, takes the max of the 铿乴ter output value and zero, which sharpens
+the resolution of the convolution 铿乴ter output. 20
+The 铿乶al operation in a building block is 鈥渕ax-pooling.鈥?We implement this
+operation using a small 铿乴ter that scans over the input matrix and returns the
+maximum value of the elements entering the 铿乴ter at each location in the im-
+age. The role of max-pooling is twofold. First, it acts as a dimension-reduction
+device. Nearby neurons output from the convolution operation often carry sim-
+ilar information. If any of the neurons in the 铿乴ter region are stimulated, max-
+pooling detects it. At the same time, it discards locally redundant informa-
+tion. For example, a 2 脳 2 pooling 铿乴ter shrinks the height and width of the in-
+put by half, and does so without introducing new parameters to be estimated,
+further promoting parsimony in the CNN. In this respect, max-pooling is an
+image counterpart to the familiar idea of downsampling from the signal pro-
+cessing literature. Second, by taking local maxima throughout the image, the
+output is left generally unaffected by small perturbations of the input pattern
+(illustrated in Figure A1, Panel B). In this sense, max-pooling is a denoising
+tool that enhances CNN robustness to local deformation, much like the convo-
+lution operation aids CNN robustness to variation in object position.
+Figure A2 illustrates how convolution, activation, and max-pooling combine
+to form the basic building block for a CNN model. These blocks are then
+stacked together to customize predictive CNN models with varying degrees
+of richness. In general, the data input to a building block is a tensor with di-
+mensions h 脳 w 脳 d. The lingua franca of CNN refers to image depth d as the
+number of 鈥渃hannels.鈥?In the very 铿乺st block of our network, the input is a black
+and white image, which is a matrix. Our black and white images thus have one
+channel. Each 铿乴ter output has dimension h 脳 w 脳 1. If a building block uses
+multiple 铿乴ters, their outputs are stacked together in the third dimension of
+the tensor so outputs have multiple channels, one channel corresponding to
+each 铿乴ter . Building blocks in the interior layers of our CNN therefore take
+
+
+==== PAGE 54 ====
+3246 The Journal of Finance 庐
+Figure A2. Diagram of a building block. This 铿乬ure illustrates that a building block of the
+CNN model consists of a convolutional layer with 3 脳 3 铿乴ter , a leaky ReLU layer , and a 2脳 2m a x -
+pooling layer . The notation D@HxW shows the output size of the CNN building block where H is
+the height, W is the width, and D is the number of channels. In this example, the input has size
+16 脳 8 with two channels. To double the depth of the input, four 铿乴ters are applied, which generates
+the output with four channels. The max-pooling layer shrinks the 铿乺st two dimensions (height and
+width) of the input by half and keeps the same depth. Leaky ReLU keeps the same size of the
+previous input. In general, with input of size H 脳 W 脳 D, the output has size H/2 脳 W/2 脳 2D.
+One exception is the 铿乺st building block of each CNN model that takes the gray-scale image as
+input: The input has depth of one and the number of CNN 铿乴ters is 32, boosting the depth of the
+output to 32.
+each 铿乴ter of size (3 脳 3) gains depth equal to the number of input channels
+d (e.g., the 铿乴ter is 3 脳 3 脳 d). Filters therefore aggregate input information
+locally in the height and width dimensions, and then combine this local infor-
+mation across all channels. In Figure A2, the input has height of 16 and width
+of eight and has two channels. Thus, each 铿乴ter is 3 脳 3 脳 2. The example uses
+four 铿乴ters, so the size of the convolution output is 16 脳 8 脳 4.
+Within a building block, the output from all convolutional 铿乴ters is fed
+element-wise through the leaky ReLU activation function, which preserves the
+dimensions of the convolution output. In the example, the ReLU activation out-
+put is therefore 16 脳 8 脳 4. Finally , a max-pooling 铿乴ter of size 2脳 2 with stride
+of two is applied to each channel separately , reducing their height and width
+by one-half each. The 铿乶al output of the building block is 8 脳 4 脳 4.
+This output serves as the input to the next building block. By stacking many
+of these blocks together , the network 铿乺st creates representations of small com-
+ponents of the image and then gradually assembles them into representations
+of larger areas. The output from the last building block is 铿俛ttened into a vec-
+tor and each element is treated as a feature in a standard, fully connected
+feed-forward layer for the 铿乶al prediction step. The 铿乶al prediction is a linear
+combination of the vectorized image features, which is fed through a softmax
+(i.e., logistic) function to generate a probability of whether the future price
+will rise.
+Having introduced the generic architectural components of CNN, we now
+discuss speci铿乧 choices for our models. Since our images are largely sparse
+in the vertical dimension, we use 5 脳 3 convolutional 铿乴ters and 2 脳 1 max-
+ 15406261, 2
+
+==== PAGE 55 ====
+(Re-)Imag(in)ing Price Trends 3247
+pooling 铿乴ters. We use the same 铿乴ter sizes in all layers for convenience. We
+use vertical strides of 1, 3, and 3, and vertical dilation rates of 1, 2, and 3 for
+5-, 20-, and 60-day images, respectively , only on the 铿乺st layer , where inputs are
+sparse raw images. The number of CNN building blocks in our model is based
+on the size of the input image. We use two blocks to model 铿乿e-day images,
+three blocks for 20-day images, and four blocks for 60-day images. The number
+of 铿乴ters for the 铿乺st building block is 64 for all three models. 21 As pointed out
+by Zeiler and Fergus ( 2014), learned features become more complex in deeper
+layers, so we follow the literature and increase the number of 铿乴ters after each
+convolutional layer by a factor of two (e.g., 64, 128, 256, and 512 铿乴ters, re-
+spectively , in the four layers of the 60-day model). In turn, the fully connected
+layers have 15,360, 46,080, and 184,320 neurons for 5-, 20-, and 60-day models,
+respectively , which are determined by the outputs of the convolutional blocks.
+The total number of parameters are 155,138 for the 铿乿e-day model, 708,866 for
+the 20-day model, and 2,952,962 for the 60-day model, respectively .22 Of course,
+the effective parameterization of these models is much smaller than this pa-
+rameter count due to heavy regularization that shrinks most parameters close
+to zero.
+REFERENCES
+Bajgrowicz, Pierre, and Olivier Scaillet, 2012, Technical trading revisited: False discoveries, per-
+sistence tests, and transaction costs, Journal of Financial Economics 106, 473鈥?91.
+Barberis, Nicholas, 2018, Psychology-based models of asset prices and trading volume, in B. Dou-
+glas Bernheim, Stefano DellaVigna and David Laibson, eds., Handbook of Behavioral Eco-
+nomics: Applications and Foundations 1 , 79鈥?75 (Elsevier , North-Holland).
+Barberis, Nicholas, Andrei Shleifer, and Robert Vishny, 1998, A model of investor sentiment,
+Journal of Financial Economics 49, 307鈥?43.
+Blume, Lawrence, David Easley, and Maureen O鈥橦ara, 1994, Market statistics and technical anal-
+ysis: The role of volume, Journal of Finance 49, 153鈥?81.
+Brock, William, Josef Lakonishok, and Blake LeBaron, 1992, Simple technical trading rules and
+the stochastic properties of stock returns, Journal of Finance 47, 1731鈥?764.
+Brown, David P ., and Robert H. Jennings, 1989, On technical analysis, Review of Financial Studies
+2, 527鈥?51.
+Chen, Jou-Fan, Wei-Lun Chen, Chun-Ping Huang, Szu-Hao Huang, and An-Pin Chen, 2016, Fi-
+nancial time-series data analysis using deep convolutional neural networks, in 2016 7th In-
+ternational Conference on Cloud Computing and Big Data (CCBD) , 87鈥?2 (IEEE).
+Cohen, Naftali, Tucker Balch, and Manuela Veloso, 2020, Trading via image classi铿乧ation, Pro-
+ceedings of the First
+
+==== PAGE 57 ====
+(Re-)Imag(in)ing Price Trends 3249
+Maas, Andrew L., Awni Y . Hannun, and Andrew Y . Ng, 2013, Recti铿乪r nonlinearities improve neu-
+ral network acoustic models, in Proceedings of the 30th International Conference on Machine
+Learning 28,3 .
+Mandelbrot, Benoit B., 2013, Fractals and Scaling in Finance: Discontinuity, Concentration, Risk
+(Springer Science & Business Media, Springer New Y ork, NY).
+Menkhoff, Lukas, 2010, The use of technical analysis by fund managers: International evidence,
+Journal of Banking & Finance 34, 2573鈥?586.
+Murphy, John J., 1999, Technical Analysis of the Financial Markets: A Comprehensive Guide to
+Trading Methods and Applications (New Y ork Institute of Finance. New Y ork).
+Murray, Scott, Houping Xiao, and Yusen Xia, 2021, Charting by machines, Working paper , Georgia
+State University.
+Neely, Christopher J., David E. Rapack, Jun Tu, and Guofu Zhou, 2014, Forecasting the equity
+risk premia: The role of technical indicators, Management Science 60, 1772鈥?791.
+Pan, Sinno Jialin, and Qiang Y ang, 2009, A survey on transfer learning, IEEE Transactions on
+Knowledge and Data Engineering 22, 1345鈥?359.
+Parkinson, Michael, 1980, The extreme value method for estimating the variance of the rate of
+return, Journal of Business 53, 61鈥?5.
+Schwert, G. William, 2003, Chapter 15 anomalies and market ef铿乧iency , in Handbook of the Eco-
+nomics of Finance 1, 939鈥?74 (Elsevier).
+Simonyan, Karen, and Andrew Zisserman, 2015, Very Deep Convolutional Networks for Large-
+Scale Image Recognition, in Proceedings of the International Conference on Learning Repre-
+sentations (ICLR).
+Srivastava, Nitish, Geoffrey Hinton, Alex Krizhevsky, Ilya Sutskever, and Ruslan Salakhutdinov,
+2014, Dropout: A simple way to prevent neural networks from over铿乼ting, Journal of Machine
+Learning Research 15, 1929鈥?958.
+Sullivan, Ryan, Allan Timmermann, and Halbert White, 1999, Data-snooping, technical trading
+rule performance, and the bootstrap, Journal of Finance 54, 1647鈥?691.
+Zeiler, Matthew D., and Rob Fergus, 2014, Visualizing and understanding convolutional networks,
+in David Fleet, Tomas Pajdla, Bernt Schiele, and Tinne Tuytelaars, eds., European Conference
+on Computer Vision , 818鈥?33 (Springer, Cham).
+Zhu, Yingzi, and Guofu Zhou, 2009, Technical analysis: An asset allocation perspective on the use
+of moving averages, Journal of Financial Economics 92, 519鈥?44.
+Supporting Information
+Additional Supporting Information may be found in the online version of this
+article at the publisher鈥檚 website:
+Appendix S1: Internet Appendix.
+Replication Code.
+ 15406261, 2023, 6, Downloaded from https://onlinelibrary.wiley.com/doi/10.1111/jofi.13268 by Southampton University Hartley Library, Wiley Online Library on [07/02/2026]. See the Terms and Conditions (https://onlinelibrary.wiley.
+

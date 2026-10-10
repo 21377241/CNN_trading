@@ -1,0 +1,14 @@
+\section{Temporal Numerical Benchmark}
+\label{sec:temporal_benchmark}
+
+The preceding tests show that a chart-image CNN is not dominated by flattened tabular learners. A sharper identification question remains: does the CNN residual reflect image representation, or does it arise because the MLP benchmark has weak built-in temporal structure? To address this, we add a temporal numerical benchmark that keeps the same 120D OHLCV information set but reshapes it as a $20\times 6$ sequence. The model is a deliberately simple 1D-CNN with two local temporal convolution layers, global average pooling, and a linear output. Labels, sample construction, chronological train-validation split, validation criterion, and OOS evaluation are kept fixed.
+
+\input{tables/temporal_benchmark}
+
+Table~\ref{tab:temporal_benchmark} shows that the temporal numerical benchmark is strong. The 1D-CNN-120 reaches a Rank IC of 0.0484 and an equal-weighted high-minus-low Sharpe of 3.21 under the standard arithmetic Sharpe convention, exceeding the chart CNN, HistGB-120, and MLP-120 in the current benchmark. This result confirms that temporal inductive bias matters: a substantial share of the apparent CNN advantage relative to flattened models reflects local time-series structure rather than image encoding alone.
+
+\input{tables/temporal_spanning}
+
+However, the 1D-CNN does not fully span the chart CNN. Table~\ref{tab:temporal_spanning} reports a daily Pearson score correlation of 0.345 and a top-decile overlap of 23.9\%. In joint Fama--MacBeth regressions, the CNN coefficient remains positive after controlling for the temporal numerical score, with a Newey--West $t$-statistic of 3.90. The residualized CNN score also retains positive out-of-sample predictability, though its equal-weighted Sharpe falls to 0.81. Finally, an equal-weight ensemble of standardized CNN and 1D-CNN scores reaches a Sharpe of 3.46, above either standalone model.
+
+These findings refine the main interpretation. The evidence does not support a large pure-image residual relative to strong temporal numerical learning. Instead, temporal numerical models absorb a large part of the CNN-versus-flattened-model residual. At the same time, the chart CNN remains only partially spanned: its pairwise residual conditional on the 1D-CNN is statistically significant and it improves the temporal model in a simple ensemble.

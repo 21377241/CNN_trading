@@ -1,0 +1,152 @@
+# E0 model registry: canonical model -> prediction file -> generating config/script.
+# Paths are relative to the project root. `role` values:
+#   canonical  : candidate for the frozen main table
+#   variant    : alternative version of a canonical model (kept for reconciliation)
+#   legacy     : superseded protocol (random validation / MCC selection / single seed)
+#   ablation   : E2A feature ablations
+#   score_panel: derived score panels used by E3-E5 (no new model)
+reference_labels: WORK_SPACE/paper/E2_matched_is_ind_chrono_ric/preds/pred_cnn_oos.csv
+
+models:
+  chartcnn_e1b_ric:
+    role: canonical
+    family: chart_cnn
+    input: I20 image 1x64x60 (OHLC bars + MA20 + volume)
+    architecture: Jiang I20 CNN 64-128-256, 708,866 params
+    seeds: 5-model ensemble (checkpoint0-4)
+    selection: chrono val 2006-2007, val Rank IC; early stop on val loss
+    file: WORK_SPACE/paper/E2_matched_is_ind_chrono_ric/preds/pred_cnn_oos.csv
+    duplicates: [WORK_SPACE/paper/E2_matched_is_ind_chrono_ric_mlp4/preds/pred_cnn_oos.csv]
+    checkpoints: WORK_SPACE/paper/E1b_cnn_hp_I20R5_ric/D20L3F53S31D21MP21F53S11D11MP21F53S11D11MP21C256/20d5p-lr1E-4-dp0.50-maTrue-vbTrue-weekTrained-noDelayedReturn-ric-full-p5
+    config: experiments/E1_image_baseline/config_cnn_hp_ric.yaml
+    script: ashare_train/3b_cnn_hp_search.py
+  onedcnn_120:
+    role: canonical
+    family: temporal_cnn
+    input: 20 days x 6 features (120D)
+    architecture: Conv1D hidden [32, 64], kernel 3, dropout 0.25, 7,073 params
+    seeds: 42-46 ensemble (mean prob)
+    selection: chrono val 2006-2007, val Rank IC
+    file: WORK_SPACE/paper/E2C_temporal_1dcnn_120/preds/pred_1dcnn120_oos.csv
+    config: experiments/E2C_temporal/config_1dcnn_120.yaml
+    script: experiments/E2C_temporal/train_1dcnn.py
+  mlp4_120_s5:
+    role: canonical
+    family: mlp
+    input: 120D OHLCV features
+    architecture: MLP (128,64,32,16), 26,369 params
+    seeds: 42-46 (mean prob)
+    selection: chrono val 2006-2007, val Rank IC early stopping
+    file: WORK_SPACE/paper/E2F_mlp_depth/preds/pred_mlp4_oos.csv
+    config: experiments/E2F_mlp_depth/README.md (fixed in run_depth.py)
+    script: experiments/E2F_mlp_depth/run_depth.py
+  mlp4_180_bag10:
+    role: variant
+    family: mlp
+    input: 180D (120D OHLCV + 60D chart indicators)
+    architecture: MLP (128,64,32,16)
+    seeds: 42-51 bagging (mean prob)
+    selection: chrono val, val Rank IC early stopping
+    file: WORK_SPACE/paper/E2_matched_is_ind_chrono_ric_mlp4/preds/pred_mlp_oos.csv
+    config: experiments/E2_matched_tabular/config_ind_chrono_ric_mlp4.yaml
+    script: experiments/E2_matched_tabular/run_train.py
+  mlp2_180_bag10:
+    role: variant
+    family: mlp
+    input: 180D (120D OHLCV + 60D chart indicators)
+    architecture: MLP (128,64)
+    seeds: 42-51 bagging (mean prob)
+    selection: chrono val, val Rank IC early stopping
+    file: WORK_SPACE/paper/E2_matched_is_ind_chrono_ric/preds/pred_mlp_oos.csv
+    config: experiments/E2_matched_tabular/config_ind_chrono_ric.yaml
+    script: experiments/E2_matched_tabular/run_train.py
+  mlp2_120_s5:
+    role: variant
+    family: mlp
+    input: 120D
+    architecture: MLP (128,64)
+    seeds: 42-46
+    file: WORK_SPACE/paper/E2F_mlp_depth/preds/pred_mlp2_oos.csv
+    script: experiments/E2F_mlp_depth/run_depth.py
+  mlp3_120_s5:
+    role: variant
+    family: mlp
+    input: 120D
+    architecture: MLP (128,64,32)
+    seeds: 42-46
+    file: WORK_SPACE/paper/E2F_mlp_depth/preds/pred_mlp3_oos.csv
+    script: experiments/E2F_mlp_depth/run_depth.py
+  mlp5_120_s5:
+    role: variant
+    family: mlp
+    input: 120D
+    architecture: MLP (128,64,32,16,8)
+    seeds: 42-46
+    file: WORK_SPACE/paper/E2F_mlp_depth/preds/pred_mlp5_oos.csv
+    script: experiments/E2F_mlp_depth/run_depth.py
+  histgb_180:
+    role: canonical
+    family: gbdt
+    input: 180D
+    architecture: HistGradientBoosting, grid-searched on val Rank IC
+    seeds: random_state 42
+    file: WORK_SPACE/paper/E2_matched_is_ind_chrono_ric/preds/pred_histgb_oos.csv
+    duplicates: [WORK_SPACE/paper/E2_matched_is_ind_chrono_ric_mlp4/preds/pred_histgb_oos.csv]
+    config: experiments/E2_matched_tabular/config_ind_chrono_ric.yaml
+    script: experiments/E2_matched_tabular/run_train.py
+  logit_180:
+    role: canonical
+    family: linear
+    input: 180D
+    architecture: SGD logistic, grid-searched on val Rank IC
+    file: WORK_SPACE/paper/E2_matched_is_ind_chrono_ric/preds/pred_logit_oos.csv
+    config: experiments/E2_matched_tabular/config_ind_chrono_ric.yaml
+    script: experiments/E2_matched_tabular/run_train.py
+  chartcnn_pre_ric:
+    role: legacy
+    family: chart_cnn
+    note: pre-Rank-IC chart-CNN (E1 random-val or E1b MCC selection); shared by all E2_matched_is* and E2A dirs, see hash groups
+    file: WORK_SPACE/paper/E2_matched_is_ind_chrono/preds/pred_cnn_oos.csv
+  mlp2_180_seed42:
+    role: legacy
+    family: mlp
+    note: single-seed MLP-2 (superseded by bagging)
+    file: WORK_SPACE/paper/E2_matched_is_ind_chrono_ric/preds/pred_mlp_oos_seed42_legacy.csv
+  e2_chrono_120_legacy:
+    role: legacy
+    note: 120D chrono run used by E2D (MCC-selected CNN, single-seed MLP)
+    files:
+      - WORK_SPACE/paper/E2_matched_is_chrono/preds/pred_cnn_oos.csv
+      - WORK_SPACE/paper/E2_matched_is_chrono/preds/pred_mlp_oos.csv
+
+# Paper tables / reports -> source files. Used to explain number discrepancies in E0_reconciliation.md.
+reports:
+  - doc: docs/paper_results_E2.md and docs/paper_research_framework.md (E2 main table)
+    files: [chartcnn_e1b_ric, histgb_180, mlp2_180_bag10, logit_180]
+    script: experiments/E2_matched_tabular/run_eval.py
+    summary: WORK_SPACE/paper/E2_matched_is_ind_chrono_ric/e2_summary.csv
+  - doc: docs/mlp4_propagation_audit.md (MLP-4 replacement of E2B-E5)
+    files: [chartcnn_e1b_ric, mlp4_180_bag10]
+    summary: WORK_SPACE/paper/E2_matched_is_ind_chrono_ric_mlp4/e2_summary.csv
+  - doc: docs/paper_E2C_temporal_numerical_benchmark_report.md
+    files: [chartcnn_e1b_ric, onedcnn_120]
+    script: experiments/E2C_temporal/eval_e2c.py
+  - doc: docs/paper_E2F_mlp_depth_robustness.md
+    files: [mlp2_120_s5, mlp3_120_s5, mlp4_120_s5, mlp5_120_s5]
+    summary: WORK_SPACE/paper/E2F_mlp_depth/e2f_depth_summary.csv
+  - doc: docs/paper_E2D_liquidity_implementability_audit.md
+    files: [e2_chrono_120_legacy, onedcnn_120]
+    script: experiments/E2D_liquidity/run_e2d_audit.py
+  - doc: docs/paper_results_E2G.md
+    files: [chartcnn_e1b_ric, onedcnn_120, mlp4_180_bag10]
+    script: experiments/E2G_chart_capacity/eval_e2g.py
+    note: benchmark labelled mlp4_120 actually used the 180D bag-10 MLP-4 file
+  - doc: docs/paper_results_E3.md, docs/paper_results_E4.md, docs/paper_results_E5.md
+    files: [chartcnn_e1b_ric, mlp2_180_bag10, histgb_180]
+    panel: WORK_SPACE/paper/E3_shared_specific_chrono_ric/scores.parquet
+  - doc: E3/E4/E5 *_mlp4 replacement runs
+    files: [chartcnn_e1b_ric, mlp4_180_bag10, histgb_180]
+    panel: WORK_SPACE/paper/E3_shared_specific_chrono_ric_mlp4/scores.parquet
+  - doc: docs/paper_E3T_cnn_1d_temporal_decomposition.md, paper_E4T*, paper_E5T*
+    files: [chartcnn_e1b_ric, onedcnn_120]
+    panel: WORK_SPACE/paper/E3T_cnn_1d_temporal/scores.parquet

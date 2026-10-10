@@ -51,8 +51,15 @@ class EquityDataset(Dataset):
                  ma_lags: list = None,
                  country: str = COUNTRY,
                  image_scale: str = 'norm255',
-                 label_col: str = 'binary_label'):
-
+                 label_col: str = 'binary_label',
+                 dataset_dir: str = None):
+        """
+        Args:
+            dataset_dir: 图表数据集目录（可选）。
+                         默认由 get_dataset_dir(country) 推断（SPX路径）。
+                         CSI800 请显式传入 get_dataset_dir(CSI800_COUNTRY,
+                         base_savepath=CSI800_STOCKS_SAVEPATH)。
+        """
         self.years = years
         self.window_size = window_size
         self.predict_window = predict_window
@@ -67,7 +74,7 @@ class EquityDataset(Dataset):
         self.img_h = IMAGE_HEIGHT.get(window_size, 64)
         self.img_size = self.img_w * self.img_h
 
-        self.dataset_dir = get_dataset_dir(country)
+        self.dataset_dir = dataset_dir if dataset_dir is not None else get_dataset_dir(country)
 
         # 加载所有年份的数据
         self._images: np.ndarray = None   # (N, H, W) float32

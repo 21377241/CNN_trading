@@ -1,0 +1,24 @@
+\begin{table}[htbp]
+\centering
+\caption{Incremental return predictability: Fama--MacBeth tests}
+\label{tab:complementarity_fm}
+\begin{tabular}{llrr}
+\toprule
+Comparison & Model term & $\bar{\beta}$ & NW $t$ \\
+\midrule
+CNN--HistGB & CNN alone & 0.00119 & 9.34 \\
+CNN--HistGB & HistGB alone & 0.00144 & 11.76 \\
+CNN--HistGB & CNN controlling HistGB & 0.00078 & 6.32 \\
+CNN--HistGB & HistGB controlling CNN & 0.00112 & 9.39 \\
+\midrule
+CNN--MLP & CNN alone & 0.00119 & 9.34 \\
+CNN--MLP-4 & MLP-4 alone & 0.00175 & 12.59 \\
+CNN--MLP-4 & CNN controlling MLP-4 & 0.00071 & 5.75 \\
+CNN--MLP-4 & MLP-4 controlling CNN & 0.00149 & 10.85 \\
+\bottomrule
+\end{tabular}
+\begin{minipage}{0.92\linewidth}
+\footnotesize
+\textit{Notes:} Daily cross-sectional regressions use standardized model scores. Coefficients are averaged over time and tested using Newey--West standard errors with lag 4.
+\end{minipage}
+\end{table}

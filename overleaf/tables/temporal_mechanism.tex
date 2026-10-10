@@ -1,0 +1,17 @@
+\begin{table}[htbp]
+\centering
+\caption{Economic realization: pairwise CNN--1D-CNN specific signals}
+\label{tab:temporal_mechanism}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lrrrrrr}
+\toprule
+Component & $r_1$ IC & $R_{1:5}$ IC & $R_{1:10}$ IC & Pressure $\Delta$IC & Neg. recent spread & Pos. recent spread \\
+\midrule
+CNN-specific conditional on 1D-CNN & 0.0184 & 0.0140 & 0.0089 & 0.0007 (0.25) & 0.00125 & 0.00012 \\
+1D-CNN-specific conditional on CNN & 0.0137 & 0.0407 & 0.0428 & 0.0250 (7.39) & 0.00429 & 0.00447 \\
+\bottomrule
+\end{tabular}%
+}
+\vspace{0.25em}
+\footnotesize\textit{Notes:} IC is mean daily Rank IC. Pressure $\Delta$IC is high-minus-low pressure-state $R_{1:5}$ IC, with Newey--West $t$ in parentheses. Spreads are $R_{1:5}$ high-minus-low specific-score spreads within CumRet5 terciles.
+\end{table}

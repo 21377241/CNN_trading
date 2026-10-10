@@ -1,0 +1,22 @@
+\begin{table}[htbp]
+\centering
+\caption{CNN versus temporal numerical spanning}
+\label{tab:temporal_spanning}
+\begin{tabular}{lrr}
+\toprule
+Statistic & Estimate & Interpretation \\
+\midrule
+Pearson correlation & 0.3446 & moderate agreement \\
+Top-decile overlap & 0.2387 & partial overlap \\
+CNN coefficient controlling 1D-CNN & 0.00048 & Newey--West $t=3.90$ \\
+1D-CNN coefficient controlling CNN & 0.00215 & Newey--West $t=11.96$ \\
+CNN residual Rank IC & 0.0153 & positive residual signal \\
+CNN residual EW H-L Sharpe & 0.8111 & economically thinner residual \\
+CNN + 1D-CNN EW H-L Sharpe & 3.4613 & ensemble gain \\
+\bottomrule
+\end{tabular}
+\begin{minipage}{0.94\linewidth}
+\footnotesize
+\textit{Notes:} Correlations and top-decile overlaps are computed date by date and averaged over the 2008--2025 OOS period. Residual scores are daily residuals from projecting one model score on the other with an intercept. The ensemble averages daily standardized CNN and 1D-CNN scores.
+\end{minipage}
+\end{table}

@@ -1,0 +1,19 @@
+\begin{table}[htbp]
+\centering
+\caption{Pressure-state Rank IC}
+\label{tab:mechanism_pressure}
+\begin{tabular}{llrrrrr}
+\toprule
+Return & Score & Low & Mid & High & High--Low & NW $t$ \\
+\midrule
+$R_{1:5}$ & CNN-specific & 0.0133 & 0.0141 & 0.0172 & 0.0040 & 1.38 \\
+$R_{1:5}$ & MLP-4-specific & 0.0253 & 0.0315 & 0.0458 & 0.0205 & 7.36 \\
+$r_1$ & CNN-specific & 0.0161 & 0.0147 & 0.0216 & 0.0055 & 1.97 \\
+$r_1$ & MLP-4-specific & 0.0100 & 0.0169 & 0.0202 & 0.0103 & 3.68 \\
+\bottomrule
+\end{tabular}
+\begin{minipage}{0.92\linewidth}
+\footnotesize
+\textit{Notes:} Pressure is a pre-specified composite of turnover proxy, drawdown pressure, and terminal volume intensity. Stocks are sorted into daily pressure terciles.
+\end{minipage}
+\end{table}

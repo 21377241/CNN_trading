@@ -1,0 +1,11 @@
+\section{Transfer Validation of the Chart-CNN Paradigm}
+
+Before comparing image and tabular representations, we first validate that the chart-CNN paradigm of \citet{jiang2023reimagining} transfers to China A-shares. This validation is not a claim that the CNN dominates all alternatives. It is a narrower requirement: the migrated image model should preserve the qualitative predictability patterns of the original design.
+
+Our implementation aligns with the original paradigm along four dimensions: OHLCV histories are rendered as grayscale price charts; the CNN architecture follows the image-window-dependent convolutional design; the main experiments use five-model ensembles; and the I20/R5 specification, a 20-day image predicting roughly five-day returns, is treated as the principal chart-image specification.
+
+\input{tables/transfer_validation}
+
+Table~\ref{tab:transfer_validation} shows that the principal transfer specification is empirically meaningful. Under the common arithmetic Sharpe convention, I20/R5 reaches an equal-weighted high-minus-low Sharpe of 2.39 and a value-weighted Sharpe of 1.01. Historical alternative transfer variants are not included because their portfolio summaries have not been regenerated under this common convention.
+
+This evidence validates the migration in the sense needed for this paper. The chart-image CNN extracts economically meaningful return-predictive information in China A-shares. The remaining question is therefore whether its predictive content is unique relative to nonlinear tabular learners using the same OHLCV information.

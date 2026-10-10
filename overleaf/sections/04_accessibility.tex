@@ -1,0 +1,9 @@
+\section{Feature Engineering as an Accessibility Check}
+
+The augmented 180-dimensional tabular representation adds explicit chart indicators to the baseline 120-dimensional OHLCV representation. These indicators help identify whether hand-engineered chart features add new information or simply make already-present information easier for certain models to use.
+
+The evidence favors the accessibility interpretation. The augmented indicators change how easily models can access threshold-like chart rules, while the matched benchmark shows that flexible nonlinear learners already obtain strong predictability from the raw OHLCV panel. Exact ablation Sharpe values are not reproduced here because the historical ablation summaries were not regenerated under the current common convention.
+
+\input{tables/accessibility_delta}
+
+The implication is important but limited. The augmented indicators are functions of the same OHLCV history. Their effect is therefore not to expand the raw information set, but to change how easily a model can access threshold-like chart rules. Linear models benefit strongly from explicit access; nonlinear tabular models can recover part of the same structure internally. This section is used mainly as a bridge: once nonlinear learners can internally access many chart-like rules, the remaining question is why they still disagree so much in their stock rankings.

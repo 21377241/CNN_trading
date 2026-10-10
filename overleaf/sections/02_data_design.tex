@@ -1,0 +1,26 @@
+\section{Data and Matched-information Design}
+
+\subsection{Sample}
+
+The main sample covers China A-share stocks. For each stock-date observation, we construct a rolling 20-trading-day OHLCV history and use subsequent returns as prediction targets. The main out-of-sample period is 2008--2025, with a chronological validation protocol that uses earlier data for training and validation. Returns are clipped to reduce the influence of limit moves and extreme observations.
+
+\subsection{Information Sets}
+
+The baseline information set is the same for all models: a 20-day window of adjusted open, high, low, close, and volume variables. We consider two feature representations:
+
+\begin{itemize}
+  \item \textbf{Image representation}: OHLCV histories are rendered into chart images and passed to a CNN.
+  \item \textbf{Tabular representation}: the same 20-day OHLCV histories are flattened into tabular variables and passed to Logit, HistGB, and MLP models.
+\end{itemize}
+
+Some experiments add explicit chart indicators, including price-direction and volume-direction bits. These augmented features are used to test whether hand-engineered chart indicators add new information or merely make existing information easier for some models to access.
+
+\subsection{Validation and Evaluation}
+
+The main protocol uses chronological validation and selects hyperparameters by validation Rank IC. The main evaluation metrics are cross-sectional Rank IC and decile high-minus-low long-short portfolio Sharpe ratios. Equal-weighted long-short Sharpe is the primary economic metric, while value-weighted Sharpe is reported as a trading-capacity check. Throughout the paper, Sharpe is computed from the arithmetic mean period return divided by period volatility and annualized by $\sqrt{52}$; compounded annual returns are reported separately.
+
+Formally, for each out-of-sample date $t$, we compute the Spearman rank correlation between model scores $S_{i,t}$ and future returns $R_{i,t+1}$ across stocks:
+\begin{equation}
+  \mathrm{RankIC}_t = \mathrm{Spearman}\left(S_{i,t}, R_{i,t+1}\right).
+\end{equation}
+The reported Rank IC is the time-series average of $\mathrm{RankIC}_t$. Portfolio tests sort stocks into score deciles each date and evaluate the high-minus-low spread.
