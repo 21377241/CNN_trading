@@ -128,6 +128,28 @@ def diff_t(wa: pd.DataFrame, wb: pd.DataFrame, col: str) -> tuple[float, float]:
     return float(np.nanmean(x)), newey_west_t(x)[0]
 
 
+def plot_yearly(yearly: pd.DataFrame, path: str):
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(10, 3.6))
+    x = np.arange(len(yearly))
+    cols = ['M0', 'M1', 'M2']
+    labels = {'M0': 'M0 old', 'M1': 'M1 renderer fixed', 'M2': 'M2 clean'}
+    for i, c in enumerate(cols):
+        ax.bar(x + (i - 1) * 0.27, yearly[c], width=0.27, label=labels[c])
+    ax.axhline(0, color='k', lw=0.6)
+    ax.set_xticks(x)
+    ax.set_xticklabels(yearly.index.astype(str), rotation=45)
+    ax.set_ylabel('mean weekly Rank IC')
+    ax.set_title('Yearly OOS Rank IC on the common sample (clean labels)')
+    ax.legend(ncol=3, fontsize=8)
+    fig.tight_layout()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
 @torch.no_grad()
 def val_rank_ic(exp_dir: str, model_key: str, n: int = 5) -> dict:
     ds_dir, mode = DATASETS[model_key]
@@ -201,6 +223,7 @@ def main():
                         for m in ('M0', 'M1', 'M2')}, axis=1)
     yearly['M2_native'] = weekly[('C', 'M2')]['rank_ic'].groupby(weekly[('C', 'M2')].index.year).mean()
     yearly.to_csv(os.path.join(OUT_DIR, 'yearly_rank_ic.csv'), float_format='%.6g')
+    plot_yearly(yearly, os.path.join(PROJECT_ROOT, 'docs', 'figures', 'clean_cnn_impact_yearly_ric.png'))
 
     sub_rows = []
     for name, df, models in [('B', b, ['M0', 'M1', 'M2']), ('C', c, ['M2'])]:
