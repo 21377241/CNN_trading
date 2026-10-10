@@ -5,7 +5,15 @@
 - **待重算**：结论有效，但数字使用旧 Sharpe 口径或非规范模型版本，定稿前需要按 [protocol/E0_reconciliation.md](protocol/E0_reconciliation.md) 重算；
 - **历史**：记录当时的设计或计划，不再更新。
 
+> **2026-10-11 起，所有实验结果暂停引用。** 发现图像渲染错误（图像中没有开盘价和收盘价）和多项数据处理漏洞，所有模型的输入都受影响。下表中的“现行”“待重算”状态均以此为前提，结论等干净版本重做后再定。详见 [progress/2026-10-11_progress_report.md](progress/2026-10-11_progress_report.md)。
+
 模型与预测文件的对应关系，以 [protocol/model_registry.md](protocol/model_registry.md) 为准。
+
+## progress/：进度汇报
+
+| 文档 | 内容 |
+|---|---|
+| [2026-10-11_progress_report.md](progress/2026-10-11_progress_report.md) | 图像渲染错误（缺开盘价、收盘价）、数据处理漏洞、干净重建方案、待决定事项；E7、规模效应和论文主线暂缓 |
 
 ## protocol/：口径、协议与审计（全部现行）
 
@@ -51,7 +59,7 @@
 | E2C | [paper_E2C_temporal_numerical_benchmark_report.md](results/paper_E2C_temporal_numerical_benchmark_report.md) | 现行 |
 | E2C | [paper_results_E2C_temporal_benchmark.md](results/paper_results_E2C_temporal_benchmark.md) | 待重算（正文 Sharpe 为旧口径） |
 | E2F | [paper_E2F_mlp_depth_robustness.md](results/paper_E2F_mlp_depth_robustness.md) | 现行 |
-| E2G | [paper_results_E2G.md](results/paper_results_E2G.md) | 现行（MLP-4-120 基准已于 E0 更正） |
+| E2G | [paper_results_E2G.md](results/paper_results_E2G.md) | 作废待重做（图像缺开盘价、收盘价） |
 | E3 | [paper_results_E3.md](results/paper_results_E3.md) | 分解结果现行；单模型表的 Sharpe 为旧口径，待重算 |
 | E3T | [paper_E3T_cnn_1d_temporal_decomposition.md](results/paper_E3T_cnn_1d_temporal_decomposition.md) | 现行 |
 | E4 / E4T | [paper_results_E4.md](results/paper_results_E4.md)、[paper_E4T_cnn_1d_recent_path.md](results/paper_E4T_cnn_1d_recent_path.md) | 现行 |
@@ -60,7 +68,7 @@
 | MLP 稳定性 | [paper_results_mlp_stability.md](results/paper_results_mlp_stability.md)、[paper_mlp_single_vs_bagged.md](results/paper_mlp_single_vs_bagged.md) | 待重算（旧 Sharpe 口径） |
 | MLP-4 替换 | [mlp4_propagation_audit.md](results/mlp4_propagation_audit.md) | 现行 |
 | 口径统一 | [paper_standardized_results_update.md](results/paper_standardized_results_update.md) | 现行 |
-| E7 | [paper_results_E7.md](results/paper_results_E7.md) | 现行（按冻结协议运行；H1、H3 成立，H2 不成立；追加的 ChartCNN-S 检验表明包含结论对容量稳健） |
+| E7 | [paper_results_E7.md](results/paper_results_E7.md) | 作废待重做（输入受渲染错误和数据漏洞影响；分析框架在干净版本中复用） |
 
 ## repro/：Jiang et al. (2023) 复现阶段
 
