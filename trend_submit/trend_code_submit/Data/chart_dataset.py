@@ -58,10 +58,13 @@ class EquityDataset(Dataset):
                  image_scale: str = 'norm255',
                  label_col: str = 'binary_label',
                  dataset_dir: str = None,
-                 sample_mode: str = 'legacy'):
+                 sample_mode: str = 'legacy',
+                 batched: bool = False):
         if sample_mode not in self.SAMPLE_MODES:
             raise ValueError(f'sample_mode 须为 {self.SAMPLE_MODES}，得到 {sample_mode}')
         self.sample_mode = sample_mode
+        if batched:
+            self.__getitems__ = self._get_batch
         """
         Args:
             dataset_dir: 图表数据集目录（可选）。
@@ -175,10 +178,25 @@ class EquityDataset(Dataset):
         lbl = torch.tensor(self._labels[idx], dtype=torch.long)
         return img, lbl
 
+    def _get_batch(self, idx):
+        """按批取样；batched=True 时挂为 __getitems__ 供 DataLoader 使用，须配合 batch_collate。"""
+        idx = np.asarray(idx, dtype=np.int64)
+        x = self._images[idx]
+        if x.dtype == np.uint8:
+            img = torch.from_numpy(x.astype(np.float32) / 255.0)
+        else:
+            img = torch.from_numpy(np.ascontiguousarray(x, dtype=np.float32))
+        return img, torch.from_numpy(self._labels[idx])
+
     @property
     def meta(self) -> pd.DataFrame:
         """返回元数据 DataFrame"""
         return self._meta
+
+
+def batch_collate(batch):
+    """配合 EquityDataset.__getitems__：批已在数据集中拼好，原样返回。"""
+    return batch
 
 
 class TS1DDataset(Dataset):

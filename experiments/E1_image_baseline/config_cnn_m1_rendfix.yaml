@@ -1,0 +1,25 @@
+# 阶段 4a M1：旧数据流程（旧面板、tail(20) 窗口、窗口内累计均线、原始成交量、旧样本键与标签）+ Jiang 渲染器。
+# 超参数与训练流程同 M0（E1b_cnn_hp_I20R5_ric 的 phase3 选中组 lr 1e-4 / dropout 0.5 / patience 5，含学习率调度器）。
+# 输入由 ashare_train/2m1_rerender_legacy_windows.py 生成。
+spec: I20R5
+window_size: 20
+predict_window: 5
+freq: week
+country: CHN
+
+train_years: [2000, 2001, 2002, 2003, 2004, 2005]
+val_years: [2006, 2007]
+oos_years: [2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
+
+dataset_subdir: I20R5_rendfix
+out_root: WORK_SPACE/paper/E1c_cnn_M1_rendfix
+training: legacy
+
+hp:
+  lr: 1.0e-4
+  dropout: 0.50
+  patience: 5
+n_ensembles: 5
+batch_size: 128
+max_epochs: 50
+dir_suffix: ric-full-p5

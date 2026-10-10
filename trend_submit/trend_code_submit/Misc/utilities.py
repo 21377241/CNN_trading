@@ -65,10 +65,10 @@ def compute_mcc(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     y_true = np.array(y_true, dtype=int)
     y_pred = np.array(y_pred, dtype=int)
 
-    tp = np.sum((y_true == 1) & (y_pred == 1))
-    tn = np.sum((y_true == 0) & (y_pred == 0))
-    fp = np.sum((y_true == 0) & (y_pred == 1))
-    fn = np.sum((y_true == 1) & (y_pred == 0))
+    tp = float(np.sum((y_true == 1) & (y_pred == 1)))
+    tn = float(np.sum((y_true == 0) & (y_pred == 0)))
+    fp = float(np.sum((y_true == 0) & (y_pred == 1)))
+    fn = float(np.sum((y_true == 1) & (y_pred == 0)))
 
     denom = np.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
     if denom == 0:

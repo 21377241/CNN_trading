@@ -32,11 +32,33 @@ from Misc.config import (
     EARLY_STOP_PATIENCE, FREQ, MA_LAGS, VOLUME_BAR, COUNTRY
 )
 from Misc.utilities import compute_mcc, setup_logger
-from Data.chart_dataset import EquityDataset
+from Data.chart_dataset import EquityDataset, batch_collate
 from Data.dgp_config import IMAGE_WIDTH, IMAGE_HEIGHT
 from Model.cnn_model import init_model, get_full_model_name
 
 logger = logging.getLogger(__name__)
+
+# 'legacy'：旧流程（ReduceLROnPlateau；HP trial 保存验证 Rank IC 最高那一轮），仅用于复现旧结果
+# 'clean' ：clean_spec 5.1（无学习率调度；按验证 loss 早停并保存 loss 最优 checkpoint；
+#           trial 得分为 loss 最优 checkpoint 的验证 Rank IC；训练/验证用 sample_mode='train'，OOS 用 'oos'）
+TRAINING_MODES = ('legacy', 'clean')
+
+
+def _sample_modes(training: str) -> tuple[str, str]:
+    if training not in TRAINING_MODES:
+        raise ValueError(f'training 须为 {TRAINING_MODES}，得到 {training}')
+    return ('legacy', 'legacy') if training == 'legacy' else ('train', 'oos')
+
+
+def _dataset(years, ws, pw, freq, has_vb, ma_lags, country, dataset_dir, sample_mode) -> EquityDataset:
+    return EquityDataset(years=years, window_size=ws, predict_window=pw, freq=freq, has_volume_bar=has_vb,
+                         ma_lags=ma_lags, country=country, image_scale='norm255', dataset_dir=dataset_dir,
+                         sample_mode=sample_mode, batched=True)
+
+
+def _loader(ds, batch_size: int, shuffle: bool) -> DataLoader:
+    return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, num_workers=0, pin_memory=False,
+                      collate_fn=batch_collate)
 
 
 # ─────────────────────────────────────────────
@@ -192,7 +214,8 @@ def train_us_model(ws_list: list = None,
                    dataset_dir: str = None,
                    dir_suffix: str = None,
                    skip_oos: bool = False,
-                   force_retrain: bool = False):
+                   force_retrain: bool = False,
+                   training: str = 'legacy'):
     """
     训练多个 (window_size, predict_window) 组合的集成 CNN 模型，并生成 OOS 预测。
 
@@ -219,7 +242,9 @@ def train_us_model(ws_list: list = None,
         dir_suffix: 追加到实验目录名（HP 搜索时区分 patience 等）。
         skip_oos: 为 True 时不生成 OOS 预测（HP 搜索 Phase 1/2）。
         force_retrain: 为 True 时忽略已有 checkpoint 重新训练。
+        training: 'legacy' | 'clean'（见 TRAINING_MODES）。
     """
+    fit_mode, oos_mode = _sample_modes(training)
     ws_list  = ws_list  or [BENCHMARK_MODEL_WINDOW]
     pw_list  = pw_list  or [BENCHMARK_MODEL_PREDICT_WINDOW]
     ma_lags  = ma_lags  if ma_lags is not None else MA_LAGS
@@ -250,41 +275,25 @@ def train_us_model(ws_list: list = None,
             logger.info(f"切分模式: IS内随机 {train_val_split:.0%}/{1-train_val_split:.0%}  IS={is_years}  OOS={oos_years}")
 
         # ── 加载训练集 ──
-        try:
-            is_dataset = EquityDataset(
-                years=is_years,
-                window_size=ws,
-                predict_window=pw,
-                freq=freq,
-                has_volume_bar=has_vb,
-                ma_lags=ma_lags,
-                country=country,
-                image_scale='norm255',
-                dataset_dir=dataset_dir
-            )
-        except RuntimeError as e:
-            logger.error(f"训练数据加载失败: {e}")
-            continue
-
-        val_dataset_fixed = None
-        if val_years:
+        all_ckpts_exist = all(os.path.exists(os.path.join(exp_dir, f'checkpoint{i}.pth.tar'))
+                              for i in range(n_ensembles))
+        is_dataset = val_dataset_fixed = None
+        if not all_ckpts_exist or force_retrain:
             try:
-                val_dataset_fixed = EquityDataset(
-                    years=val_years,
-                    window_size=ws,
-                    predict_window=pw,
-                    freq=freq,
-                    has_volume_bar=has_vb,
-                    ma_lags=ma_lags,
-                    country=country,
-                    image_scale='norm255',
-                    dataset_dir=dataset_dir
-                )
+                is_dataset = _dataset(is_years, ws, pw, freq, has_vb, ma_lags, country, dataset_dir, fit_mode)
             except RuntimeError as e:
-                logger.error(f"验证数据加载失败: {e}")
+                logger.error(f"训练数据加载失败: {e}")
                 continue
-            logger.info(f"训练集样本: {len(is_dataset)}, 验证集样本: {len(val_dataset_fixed)}")
-        else:
+            if val_years:
+                try:
+                    val_dataset_fixed = _dataset(val_years, ws, pw, freq, has_vb, ma_lags, country, dataset_dir,
+                                                 fit_mode)
+                except RuntimeError as e:
+                    logger.error(f"验证数据加载失败: {e}")
+                    continue
+                logger.info(f"训练集样本: {len(is_dataset)}（上涨比例 {is_dataset.up_share:.4f}），"
+                            f"验证集样本: {len(val_dataset_fixed)}（上涨比例 {val_dataset_fixed.up_share:.4f}）")
+        if is_dataset is not None and not val_years:
             n_total = len(is_dataset)
             n_train = int(n_total * train_val_split)
             n_val   = n_total - n_train
@@ -297,37 +306,39 @@ def train_us_model(ws_list: list = None,
                 logger.info(f"Ensemble {ens_idx}: checkpoint 已存在，跳过训练。")
                 continue
 
-            logger.info(f"\n--- 训练 Ensemble {ens_idx} ---")
+            logger.info(f"\n--- 训练 Ensemble {ens_idx}（training={training}）---")
 
             torch.manual_seed(42 + ens_idx)
             np.random.seed(42 + ens_idx)
 
             if val_dataset_fixed is not None:
-                train_loader = DataLoader(is_dataset, batch_size=batch_size,
-                                          shuffle=True, num_workers=0, pin_memory=False)
-                val_loader   = DataLoader(val_dataset_fixed, batch_size=batch_size,
-                                          shuffle=False, num_workers=0, pin_memory=False)
+                train_loader = _loader(is_dataset, batch_size, shuffle=True)
+                val_loader = _loader(val_dataset_fixed, batch_size, shuffle=False)
+                val_meta = val_dataset_fixed.meta
             else:
                 train_set, val_set = random_split(is_dataset, [n_train, n_val])
-                train_loader = DataLoader(train_set, batch_size=batch_size,
-                                          shuffle=True, num_workers=0, pin_memory=False)
-                val_loader   = DataLoader(val_set, batch_size=batch_size,
-                                          shuffle=False, num_workers=0, pin_memory=False)
+                train_loader = _loader(train_set, batch_size, shuffle=True)
+                val_loader = _loader(val_set, batch_size, shuffle=False)
+                val_meta = is_dataset.meta.iloc[val_set.indices].reset_index(drop=True)
 
             model = init_model(model_name, img_h=img_h, img_w=img_w,
                                 dropout=dropout, n_classes=2,
                                 window_size=ws).to(device)
             optimizer = optim.Adam(model.parameters(), lr=lr)
             criterion = nn.CrossEntropyLoss()
-            scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer, mode='min', patience=1, factor=0.5
-            )
+            scheduler = None
+            if training == 'legacy':
+                scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+                    optimizer, mode='min', patience=1, factor=0.5
+                )
 
             best_val_loss = float('inf')
             best_val_mcc = -1.0
             best_epoch = 0
+            loss_best_epoch = 0
             no_improve = 0
             best_state = None
+            history = []
 
             for epoch in range(1, max_epochs + 1):
                 t0 = time.time()
@@ -335,7 +346,10 @@ def train_us_model(ws_list: list = None,
                     model, train_loader, optimizer, criterion, device)
                 va_loss, va_acc, va_mcc = _eval_one_epoch(
                     model, val_loader, criterion, device)
-                scheduler.step(va_loss)
+                if scheduler is not None:
+                    scheduler.step(va_loss)
+                history.append({'seed': 42 + ens_idx, 'epoch': epoch, 'train_loss': tr_loss,
+                                'val_loss': va_loss, 'val_mcc': va_mcc})
 
                 elapsed = time.time() - t0
                 logger.info(
@@ -347,6 +361,7 @@ def train_us_model(ws_list: list = None,
 
                 if va_loss < best_val_loss - 1e-6:
                     best_val_loss = va_loss
+                    loss_best_epoch = epoch
                     no_improve = 0
                     best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
                 else:
@@ -358,19 +373,28 @@ def train_us_model(ws_list: list = None,
                     best_val_mcc = va_mcc
                     best_epoch = epoch
 
-            # 保存 checkpoint
+            # 保存 checkpoint（两种 training 都保存 loss 最优的权重）
             if best_state is not None:
-                torch.save({'epoch': best_epoch,
+                model.load_state_dict(best_state)
+                val_ric = _eval_val_rank_ic(model, val_loader, val_meta, device)
+                torch.save({'epoch': best_epoch if training == 'legacy' else loss_best_epoch,
+                            'loss_best_epoch': loss_best_epoch,
                             'model_state_dict': best_state,
                             'val_loss': best_val_loss,
                             'val_mcc': best_val_mcc,
+                            'val_rank_ic': val_ric,
+                            'training': training,
+                            'seed': 42 + ens_idx,
                             'window_size': ws,
                             'predict_window': pw,
                             'img_h': img_h,
                             'img_w': img_w,
                             'dropout': dropout},
                            ckpt_path)
-                logger.info(f"Checkpoint 保存至: {ckpt_path}")
+                pd.DataFrame(history).to_csv(os.path.join(exp_dir, f'history_seed{42 + ens_idx}.csv'),
+                                             index=False)
+                logger.info(f"Checkpoint 保存至: {ckpt_path}（loss 最优轮 {loss_best_epoch}，"
+                            f"验证 Rank IC {val_ric:.4f}）")
 
         # ── OOS 预测 ──
         if not skip_oos:
@@ -386,7 +410,8 @@ def train_us_model(ws_list: list = None,
                 country=country,
                 dropout=dropout,
                 model_name=model_name,
-                dataset_dir=dataset_dir
+                dataset_dir=dataset_dir,
+                sample_mode=oos_mode,
             )
         else:
             logger.info("skip_oos=True，跳过 OOS 预测。")
@@ -415,11 +440,15 @@ def run_cnn_trial(
     search_metric: str = 'val_rank_ic',
     channels: list[int] | tuple[int, ...] | None = None,
     save_history: bool = False,
+    training: str = 'legacy',
 ) -> dict:
     """单次 HP trial：chrono val 训练，不写 OOS。返回 val 指标。
 
-    Early stop 仍用 val_loss；跨 trial 选参默认用 best_val_rank_ic。
+    Early stop 用 val_loss；跨 trial 选参默认用 best_val_rank_ic：
+      legacy：各轮验证 Rank IC 的最大值（并保存该轮权重）
+      clean ：loss 最优 checkpoint 的验证 Rank IC（多个 seed 时取均值）
     """
+    fit_mode, _ = _sample_modes(training)
     ma_lags = ma_lags if ma_lags is not None else MA_LAGS
     device = _get_device()
     img_h = IMAGE_HEIGHT.get(ws, 64)
@@ -434,28 +463,8 @@ def run_cnn_trial(
 
     t_start = time.time()
     try:
-        is_dataset = EquityDataset(
-            years=is_years,
-            window_size=ws,
-            predict_window=pw,
-            freq=freq,
-            has_volume_bar=has_vb,
-            ma_lags=ma_lags,
-            country=country,
-            image_scale='norm255',
-            dataset_dir=dataset_dir,
-        )
-        val_dataset = EquityDataset(
-            years=val_years,
-            window_size=ws,
-            predict_window=pw,
-            freq=freq,
-            has_volume_bar=has_vb,
-            ma_lags=ma_lags,
-            country=country,
-            image_scale='norm255',
-            dataset_dir=dataset_dir,
-        )
+        is_dataset = _dataset(is_years, ws, pw, freq, has_vb, ma_lags, country, dataset_dir, fit_mode)
+        val_dataset = _dataset(val_years, ws, pw, freq, has_vb, ma_lags, country, dataset_dir, fit_mode)
     except RuntimeError as e:
         logger.error(f"HP trial 数据加载失败: {e}")
         return {
@@ -466,16 +475,17 @@ def run_cnn_trial(
             'error': str(e),
         }
 
-    train_loader = DataLoader(is_dataset, batch_size=batch_size,
-                              shuffle=True, num_workers=0, pin_memory=False)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size,
-                            shuffle=False, num_workers=0, pin_memory=False)
+    train_loader = _loader(is_dataset, batch_size, shuffle=True)
+    val_loader = _loader(val_dataset, batch_size, shuffle=False)
     val_meta = val_dataset.meta
+    logger.info(f"trial 训练集 {len(is_dataset)}（上涨比例 {is_dataset.up_share:.4f}），"
+                f"验证集 {len(val_dataset)}（上涨比例 {val_dataset.up_share:.4f}）")
 
     trial_best_mcc = -1.0
     trial_best_loss = float('inf')
     trial_best_rank_ic = float('-inf')
     trial_best_epoch = 0
+    seed_rics = []
 
     for ens_idx in range(n_ensembles):
         ckpt_path = os.path.join(exp_dir, f'checkpoint{ens_idx}.pth.tar')
@@ -493,6 +503,7 @@ def run_cnn_trial(
                 model.eval()
                 ric = _eval_val_rank_ic(model, val_loader, val_meta, device)
             trial_best_rank_ic = max(trial_best_rank_ic, float(ric))
+            seed_rics.append(float(ric))
             trial_best_epoch = max(trial_best_epoch, int(ckpt.get('epoch', 0)))
             continue
 
@@ -504,9 +515,11 @@ def run_cnn_trial(
                            channels=channels).to(device)
         optimizer = optim.Adam(model.parameters(), lr=lr)
         criterion = nn.CrossEntropyLoss()
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', patience=1, factor=0.5
-        )
+        scheduler = None
+        if training == 'legacy':
+            scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer, mode='min', patience=1, factor=0.5
+            )
 
         best_val_loss = float('inf')
         best_val_mcc = -1.0
@@ -514,6 +527,8 @@ def run_cnn_trial(
         best_epoch = 0
         no_improve = 0
         best_state = None  # by early-stop loss
+        loss_best_epoch = 0
+        loss_best_ric = float('nan')
         best_ric_state = None
         best_ric_epoch = 0
         history = []
@@ -522,7 +537,8 @@ def run_cnn_trial(
             tr_loss, _, _ = _train_one_epoch(model, train_loader, optimizer, criterion, device)
             va_loss, va_acc, va_mcc = _eval_one_epoch(model, val_loader, criterion, device)
             va_ric = _eval_val_rank_ic(model, val_loader, val_meta, device)
-            scheduler.step(va_loss)
+            if scheduler is not None:
+                scheduler.step(va_loss)
             history.append({
                 'seed': ens_seed_base + ens_idx,
                 'epoch': epoch,
@@ -539,6 +555,8 @@ def run_cnn_trial(
 
             if va_loss < best_val_loss - 1e-6:
                 best_val_loss = va_loss
+                loss_best_epoch = epoch
+                loss_best_ric = va_ric
                 no_improve = 0
                 best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             else:
@@ -547,17 +565,21 @@ def run_cnn_trial(
                     break
             if va_mcc > best_val_mcc:
                 best_val_mcc = va_mcc
-            if np.isfinite(va_ric) and va_ric > best_val_rank_ic:
+            if training == 'legacy' and np.isfinite(va_ric) and va_ric > best_val_rank_ic:
                 best_val_rank_ic = va_ric
                 best_ric_epoch = epoch
                 best_ric_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
-        # Prefer Rank-IC-best weights for HP search; fall back to loss-best
-        save_state = best_ric_state if best_ric_state is not None else best_state
-        save_epoch = best_ric_epoch if best_ric_state is not None else epoch
+        if training == 'clean':
+            best_val_rank_ic = loss_best_ric
+            save_state, save_epoch = best_state, loss_best_epoch
+        else:
+            # Prefer Rank-IC-best weights for HP search; fall back to loss-best
+            save_state = best_ric_state if best_ric_state is not None else best_state
+            save_epoch = best_ric_epoch if best_ric_state is not None else epoch
         if save_state is not None:
             # if we saved ric-best, recompute loss/mcc on that state for logging
-            if best_ric_state is not None:
+            if training == 'legacy' and best_ric_state is not None:
                 model.load_state_dict(best_ric_state)
                 model.to(device)
                 best_val_loss, _, best_val_mcc = _eval_one_epoch(
@@ -575,8 +597,10 @@ def run_cnn_trial(
                 'dropout': dropout,
                 'search_metric': search_metric,
                 'channels': list(channels) if channels is not None else None,
+                'training': training,
+                'seed': ens_seed_base + ens_idx,
             }, ckpt_path)
-        if save_history:
+        if save_history or training == 'clean':
             pd.DataFrame(history).to_csv(
                 os.path.join(exp_dir, f'history_seed{ens_seed_base + ens_idx}.csv'), index=False)
 
@@ -585,8 +609,11 @@ def run_cnn_trial(
             trial_best_loss = best_val_loss
         if np.isfinite(best_val_rank_ic):
             trial_best_rank_ic = max(trial_best_rank_ic, best_val_rank_ic)
+            seed_rics.append(float(best_val_rank_ic))
         trial_best_epoch = max(trial_best_epoch, save_epoch if save_state is not None else 0)
 
+    if training == 'clean':
+        trial_best_rank_ic = float(np.mean(seed_rics)) if seed_rics else float('nan')
     if not np.isfinite(trial_best_rank_ic) or trial_best_rank_ic == float('-inf'):
         trial_best_rank_ic = float('nan')
 
@@ -602,14 +629,21 @@ def run_cnn_trial(
         'wall_time_sec': time.time() - t_start,
         'dir_suffix': dir_suffix or '',
         'search_metric': search_metric,
+        'training': training,
+        'train_up_share': is_dataset.up_share,
+        'val_up_share': val_dataset.up_share,
     }
 
 
 def _generate_oos_predictions(exp_dir, ws, pw, img_h, img_w,
                                freq, has_vb, ma_lags, n_ensembles,
                                oos_years, batch_size, device, country,
-                               dropout, model_name, dataset_dir=None, channels=None):
-    """加载 N 个 checkpoint，对 OOS 年做集成预测，保存 ensem5_res_{year}.csv"""
+                               dropout, model_name, dataset_dir=None, channels=None,
+                               sample_mode: str = 'legacy'):
+    """加载 N 个 checkpoint，对 OOS 年做集成预测，保存 ensem5_res_{year}.csv
+
+    sample_mode='oos' 时不按标签过滤，样本键与 labels 文件（universe）一致；另存每个 seed 的 up_prob。
+    """
     ensem_dir = os.path.join(exp_dir, 'ensem_res')
     os.makedirs(ensem_dir, exist_ok=True)
 
@@ -639,17 +673,7 @@ def _generate_oos_predictions(exp_dir, ws, pw, img_h, img_w,
             continue
 
         try:
-            oos_dataset = EquityDataset(
-                years=[year],
-                window_size=ws,
-                predict_window=pw,
-                freq=freq,
-                has_volume_bar=has_vb,
-                ma_lags=ma_lags,
-                country=country,
-                image_scale='norm255',
-                dataset_dir=dataset_dir
-            )
+            oos_dataset = _dataset([year], ws, pw, freq, has_vb, ma_lags, country, dataset_dir, sample_mode)
         except RuntimeError as e:
             logger.warning(f"OOS 数据加载失败 ({year}): {e}")
             continue
@@ -658,8 +682,7 @@ def _generate_oos_predictions(exp_dir, ws, pw, img_h, img_w,
             logger.warning(f"{year} 年 OOS 数据为空，跳过。")
             continue
 
-        oos_loader = DataLoader(oos_dataset, batch_size=batch_size,
-                                shuffle=False, num_workers=0)
+        oos_loader = _loader(oos_dataset, max(batch_size, 1024), shuffle=False)
 
         # 集成预测：取 up_prob 平均
         all_up = []
@@ -675,6 +698,9 @@ def _generate_oos_predictions(exp_dir, ws, pw, img_h, img_w,
         meta = oos_dataset.meta.copy()
         meta['up_prob']   = avg_up
         meta['down_prob'] = avg_down
+        if sample_mode == 'oos':
+            for i, up in enumerate(all_up):
+                meta[f'up_prob_m{i}'] = up
 
         meta.to_csv(out_path, index=False)
         logger.info(f"OOS 预测已保存: {out_path}，样本数: {len(meta)}")

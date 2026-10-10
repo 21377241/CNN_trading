@@ -72,6 +72,9 @@ def _trial_row(trial_id: str, phase: str, lr: float, dropout: float, patience: i
         'wall_time_sec': result.get('wall_time_sec'),
         'exp_dir': result.get('exp_dir'),
         'dir_suffix': result.get('dir_suffix', ''),
+        'training': result.get('training', ''),
+        'train_up_share': result.get('train_up_share'),
+        'val_up_share': result.get('val_up_share'),
     }
 
 
@@ -101,6 +104,7 @@ def _run_trial(cfg, lr, dropout, patience, train_patience, n_ensembles,
         dir_suffix=_trial_suffix(patience, stage='hp', metric_tag=tag),
         force_retrain=force,
         search_metric=metric,
+        training=cfg.get('training', 'legacy'),
     )
     return _trial_row(trial_id, phase, lr, dropout, patience, result, stage)
 
@@ -285,6 +289,7 @@ def run_phase3(cfg, dataset_dir, out_root, force: bool) -> pd.DataFrame:
             dir_suffix=suffix,
             skip_oos=False,
             force_retrain=force,
+            training=cfg.get('training', 'legacy'),
         )
         exp_leaf = _build_exp_dir(
             model_name, ws, pw, lr, dp, freq,
@@ -292,16 +297,17 @@ def run_phase3(cfg, dataset_dir, out_root, force: bool) -> pd.DataFrame:
             base_exp_dir=out_root,
             dir_suffix=suffix,
         )
-        subprocess.run(
-            [
-                sys.executable,
-                os.path.join(PROJECT_ROOT, 'ashare_train', '4_analyze_ashare_portfolio.py'),
-                '--spec', 'I20R5',
-                '--exp-dir', exp_leaf,
-                '--n-ensembles', str(p3cfg['n_ensembles']),
-            ],
-            check=False,
-        )
+        if cfg.get('run_portfolio_analysis', True):
+            subprocess.run(
+                [
+                    sys.executable,
+                    os.path.join(PROJECT_ROOT, 'ashare_train', '4_analyze_ashare_portfolio.py'),
+                    '--spec', cfg.get('spec', 'I20R5'),
+                    '--exp-dir', exp_leaf,
+                    '--n-ensembles', str(p3cfg['n_ensembles']),
+                ],
+                check=False,
+            )
         rows.append({
             'lr': lr, 'dropout': dp, 'patience': pat,
             'dir_suffix': suffix,
@@ -346,7 +352,7 @@ def _summarize_phase3_sharpe(out_root: str, cfg: dict, phase3_df: pd.DataFrame):
     out.to_csv(out_path, index=False)
     logging.info(f'wrote {out_path}')
     baseline = float(cfg.get('baseline_ew_hl_sharpe', 2.65))
-    best = out['ew_hl_sharpe'].max()
+    best = pd.to_numeric(out['ew_hl_sharpe'], errors='coerce').max()
     if pd.notna(best):
         logging.info(f'Phase3 best EW H-L Sharpe={best:.4f} vs baseline={baseline:.4f}')
 
