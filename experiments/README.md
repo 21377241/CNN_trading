@@ -31,7 +31,7 @@
 |---|---|---|---|
 | E9 | 可交易性与执行：次日开盘成交、涨跌停与停牌约束、交易成本、换手 | `E9_tradable/` | 待写 |
 | E8 | 风险调整后的价值：自建的规模、价值、动量、反转、流动性因子 | `E8_risk_adjusted/` | 待写 |
-| E10 | 组合增量：固定组合规则 + block bootstrap 置信区间 | `E10_combination/` | 待写 |
+| E10 | 组合增量：固定组合规则 + block bootstrap 置信区间；同时比较“1D + 完整 chart-CNN”与“1D + ChartCNN-S”的成本后表现（E7 协议第 14 节） | `E10_combination/` | 待写 |
 
 执行顺序为 E9、E8、E10，之后重写全文。E7 的结论是 chart-CNN 的增量信息被 1D-CNN 包含，所以后续实验以 1D-CNN 为主要对象，chart-CNN 作为对照。E7 新建的扩展日面板、执行一致收益和控制变量面板（`E7_incremental/build_*.py`）供 E8–E10 复用。
 
