@@ -2,9 +2,18 @@
 """NumPy bar-chart renderer matching DrawOHLC (bar + ma20 + volume)."""
 from __future__ import annotations
 
+import os
+import sys
+
 import numpy as np
 
-# From Data.dgp_config (E1b charts)
+_PKG = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                    'trend_submit', 'trend_code_submit')
+if _PKG not in sys.path:
+    sys.path.insert(0, _PKG)
+
+from Data.ohlc_render import render_ohlc_batch  # noqa: E402
+
 BACKGROUND_COLOR = 0
 CHART_COLOR = 255
 VOLUME_CHART_GAP = 2
@@ -13,9 +22,29 @@ VOLUME_CHART_HEIGHT_RATIO = 0.2
 
 def fast_draw_bar(
     o: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray, v: np.ndarray,
+    ma: np.ndarray | None = None,
+) -> np.ndarray:
+    """Jiang OHLC 画法（与 DrawOHLC(bar_style='ohlc') 相同）。返回 float32 (1, H, W)，取值 [0,1]。
+
+    ma 为 None 时不画均线；干净版本须传入窗口的 MA20 路径（与价格同一尺度）。
+    """
+    o, h, l, c, v = (np.asarray(a, dtype=np.float64)[None, :] for a in (o, h, l, c, v))
+    m = None if ma is None else np.asarray(ma, dtype=np.float64)[None, :]
+    img = render_ohlc_batch(o, h, l, c, m, v)[0]
+    return (img.astype(np.float32) / 255.0)[None]
+
+
+def fast_draw_batch(o, h, l, c, v, ma=None) -> np.ndarray:
+    """批量版本：输入 (N, T)，返回 float32 (N, 1, H, W)。"""
+    img = render_ohlc_batch(o, h, l, c, ma, v)
+    return (img.astype(np.float32) / 255.0)[:, None]
+
+
+def fast_draw_bar_legacy(
+    o: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray, v: np.ndarray,
     img_w: int = 60, img_h: int = 64,
 ) -> np.ndarray:
-    """Return float32 image (1, H, W) in [0,1], matching DrawOHLC.draw_to_array()/255."""
+    """旧画法（与 DrawOHLC(bar_style='legacy_candle') 一致，窗口内累计均线），仅用于复现旧结果。"""
     o = np.asarray(o, dtype=np.float64)
     h = np.asarray(h, dtype=np.float64)
     l = np.asarray(l, dtype=np.float64)

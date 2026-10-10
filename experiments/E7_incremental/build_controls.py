@@ -85,15 +85,16 @@ def main() -> int:
     out['FloatMV'] = take(p['FloatMV'].astype('float64'), 0)
     out['is_ST'] = p['is_ST'].to_numpy()[sig]
     out['ret_1d'] = take(r, 1)
-    lim = limit_pct(out['StockID'], out['ending_date'])
+    first_trade = p.groupby('StockID', observed=True)['Date'].min()
+    first_trade.index = first_trade.index.astype(str)
+    lim = limit_pct(out['StockID'], out['ending_date'], is_st=out['is_ST'], age=pos[sig],
+                    first_trade=out['StockID'].map(first_trade), data_start=cal[0])
     out['limit_up_sig'] = out['ret_1d'] >= lim - LIMIT_TOL
     out['limit_dn_sig'] = out['ret_1d'] <= -(lim - LIMIT_TOL)
     out['n_hist'] = pos[sig] + 1
 
     info = pd.read_feather(STOCK_INFO, columns=['StockID', 'industry', 'list_date'])
     out = out.merge(info, on='StockID', how='left')
-    first_trade = p.groupby('StockID', observed=True)['Date'].min()
-    first_trade.index = first_trade.index.astype(str)
     start = out['list_date'].fillna(out['StockID'].map(first_trade))
     out['age_days'] = (out['ending_date'] - start).dt.days
     out = out.drop(columns=['list_date'])

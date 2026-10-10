@@ -49,7 +49,7 @@ def exit_price(key, code, d, px_exit, px_close, sig_rows, target, n_days, last_i
 
 def main() -> int:
     t0 = time.time()
-    p = pd.read_feather(EXT_PANEL, columns=['Date', 'StockID', 'Open', 'High', 'Low', 'Close'])
+    p = pd.read_feather(EXT_PANEL, columns=['Date', 'StockID', 'Open', 'High', 'Low', 'Close', 'is_ST'])
     cal = pd.DatetimeIndex(np.sort(p['Date'].unique()))
     n_days = len(cal)
     we = week_ends(cal)
@@ -88,7 +88,10 @@ def main() -> int:
     out['ret_oo'] = np.where(valid_e, px_o / entry - 1, np.nan)
     out['not_enterable'] = ~enterable
     out['oo_exit_delay'], out['oo_stale'], out['delisted_oo'] = delay_o, stale_o, dl_o
-    lim = limit_pct(out['StockID'].astype(str), cal[np.minimum(d[sig] + 1, n_days - 1)])
+    pos = pd.Series(code).groupby(code).cumcount().to_numpy()
+    first_trade = cal[pd.Series(d).groupby(code).transform('min').to_numpy()]
+    lim = limit_pct(out['StockID'].astype(str), cal[d[nxt]], is_st=p['is_ST'].to_numpy()[nxt], age=pos[nxt],
+                    first_trade=first_trade[nxt], data_start=cal[0])
     one_price = (O[nxt] == H[nxt]) & (H[nxt] == L[nxt]) & (L[nxt] == C[nxt])
     out['entry_lock_up'] = enterable & one_price & (C[nxt] / C[sig] - 1 >= lim - LIMIT_TOL)
     out['ret_cc_d50'] = np.where(out['delisted'], (1 + out['ret_cc']) * 0.5 - 1, out['ret_cc'])
@@ -110,7 +113,11 @@ def main() -> int:
     print(f'{len(out):,} stock-weeks, {out["ending_date"].nunique()} weeks, {time.time() - t0:.0f}s')
 
     # ---- validation against the canonical OOS labels ----
-    pr = load_canonical_preds()[KEYS + ['ret_val']]
+    try:
+        pr = load_canonical_preds()[KEYS + ['ret_val']]
+    except (FileNotFoundError, RuntimeError) as e:
+        print(f'跳过与规范预测的对账：{e}')
+        return 0
     m = pr.merge(out, on=KEYS, how='left')
     ex = m['ret_cc_clip_exact'].notna()
     chk = {

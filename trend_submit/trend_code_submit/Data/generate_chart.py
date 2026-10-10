@@ -62,8 +62,10 @@ class GenerateStockData:
                  need_adjust_price: bool = True,
                  chart_type: str = 'bar',
                  ret_col: str = None,
-                 dataset_dir: str = None):
+                 dataset_dir: str = None,
+                 bar_style: str = 'ohlc'):
 
+        self.bar_style = bar_style
         self.country = country
         self.year = year
         self.window_size = window_size
@@ -260,7 +262,8 @@ class GenerateStockData:
                         has_volume_bar=self.volume_bar,
                         chart_type=self.chart_type,
                         img_width=self.img_w,
-                        img_height=self.img_h
+                        img_height=self.img_h,
+                        bar_style=self.bar_style,
                     )
                     img_arr = drawer.draw_to_array()
                 except Exception as e:

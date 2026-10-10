@@ -18,10 +18,17 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from experiments.common.metrics import annualized_sharpe, newey_west_t  # noqa: E402,F401
 
-RAW_DIR = Path(r'F:\BaiduNetdiskDownload\股票4.14\每只股票一个文件\后复权')
-DATA = PROJECT_ROOT / 'WORK_SPACE' / 'data' / 'ashare_processed_data'
-EXT_PANEL = DATA / 'ashare_extended.feather'
-STOCK_INFO = DATA / 'ashare_stock_info.feather'
+_PKG = PROJECT_ROOT / 'trend_submit' / 'trend_code_submit'
+if str(_PKG) not in sys.path:
+    sys.path.insert(0, str(_PKG))
+from Misc.config import (  # noqa: E402
+    ASHARE_PANEL_PATH, ASHARE_PROCESSED_DATA_DIR, ASHARE_RAW_ADJ_DIR, ASHARE_STOCK_INFO_PATH,
+)
+
+RAW_DIR = Path(ASHARE_RAW_ADJ_DIR)
+DATA = Path(ASHARE_PROCESSED_DATA_DIR)
+EXT_PANEL = Path(ASHARE_PANEL_PATH)
+STOCK_INFO = Path(ASHARE_STOCK_INFO_PATH)
 OUT = PROJECT_ROOT / 'WORK_SPACE' / 'paper' / 'E7_incremental'
 OUT_DATA = OUT / 'data'
 WEEKLY_RETURNS = OUT_DATA / 'weekly_returns.feather'
@@ -104,14 +111,41 @@ def week_ends(calendar: pd.DatetimeIndex) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(d.groupby(iso['year'] * 100 + iso['week'])['Date'].max().sort_values().values)
 
 
-def limit_pct(stock: pd.Series, date: pd.Series) -> np.ndarray:
-    s = stock.astype(str)
+CHINEXT_REFORM = pd.Timestamp('2020-08-24')
+MAIN_REGISTRATION = pd.Timestamp('2023-04-10')
+MAIN_ST_10PCT = pd.Timestamp('2025-07-07')
+
+
+def limit_pct(stock: pd.Series, date: pd.Series, is_st=None, age=None, first_trade=None,
+              data_start: pd.Timestamp | None = None) -> np.ndarray:
+    """当日涨跌幅限制；无涨跌幅限制的交易日为 NaN（与之比较的判定恒为 False）。
+
+    is_st: 当日是否 ST。主板（含改革前创业板）ST 为 5%，2025-07-07 起主板 ST 为 10%；改革后创业板、科创板 ST 仍为 20%。
+    age: 上市后第几个交易日（0 = 上市首日）；first_trade: 股票在面板中的首个交易日。
+      首个交易日晚于 data_start（即上市日在数据内）时：上市首日不设限；科创板、2020-08-24 起上市的创业板、
+      2023-04-10 起上市的主板，前 5 个交易日不设限。
+    """
+    s = pd.Series(np.asarray(stock).astype(str))
+    dt = pd.to_datetime(pd.Series(np.asarray(date)))
     lim = np.full(len(s), 0.10)
-    chinext = s.str.startswith(('300', '301')) & (pd.to_datetime(date) >= pd.Timestamp('2020-08-24'))
-    star = s.str.startswith(('688', '689'))
-    bse = s.str.startswith(('4', '8', '92'))
-    lim[chinext.values | star.values] = 0.20
-    lim[bse.values] = 0.30
+    is_chinext = s.str.startswith(('300', '301')).to_numpy()
+    chinext_post = is_chinext & (dt >= CHINEXT_REFORM).to_numpy()
+    star = s.str.startswith(('688', '689')).to_numpy()
+    bse = s.str.startswith(('4', '8', '92')).to_numpy()
+    lim[chinext_post | star] = 0.20
+    lim[bse] = 0.30
+    if is_st is not None:
+        st = np.asarray(is_st).astype(bool)
+        main_like = st & ~(chinext_post | star | bse)
+        lim[main_like] = np.where((dt >= MAIN_ST_10PCT).to_numpy()[main_like], 0.10, 0.05)
+    if age is not None and first_trade is not None:
+        age = np.asarray(age, dtype=np.float64)
+        ft = pd.to_datetime(pd.Series(np.asarray(first_trade)))
+        listed_in_data = (ft > (data_start or ft.min())).to_numpy()
+        five_day = star | (is_chinext & (ft >= CHINEXT_REFORM).to_numpy()) | \
+            (~(is_chinext | star | bse) & (ft >= MAIN_REGISTRATION).to_numpy())
+        no_limit = listed_in_data & ((age == 0) | (five_day & (age < 5)))
+        lim[no_limit] = np.nan
     return lim
 
 

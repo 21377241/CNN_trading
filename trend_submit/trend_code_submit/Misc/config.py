@@ -43,8 +43,19 @@ ASHARE_RAW_ROOT = os.environ.get(
     'ASHARE_RAW_ROOT',
     r'F:\BaiduNetdiskDownload\股票4.14'
 )
+ASHARE_RAW_ADJ_DIR = os.path.join(ASHARE_RAW_ROOT, '每只股票一个文件', '后复权')
+ASHARE_RAW_UNADJ_DIR = os.path.join(ASHARE_RAW_ROOT, '每只股票一个文件', '不复权')
 ASHARE_PROCESSED_DATA_DIR = os.path.join(WORK_DIR, 'data', 'ashare_processed_data')
 ASHARE_STOCKS_SAVEPATH = os.path.join(WORK_DIR, 'data', 'ashare_stocks_dataset')
+
+# 干净版本（clean-data）：统一日面板、周度样本键、模型输入
+ASHARE_PANEL_PATH = os.path.join(ASHARE_PROCESSED_DATA_DIR, 'ashare_ret.feather')
+ASHARE_STOCK_INFO_PATH = os.path.join(ASHARE_PROCESSED_DATA_DIR, 'ashare_stock_info.feather')
+ASHARE_UNIVERSE_PATH = os.path.join(ASHARE_PROCESSED_DATA_DIR, 'universe_weekly.feather')
+CLEAN_INPUTS_DIR = os.path.join(WORK_DIR, 'paper', 'clean_inputs')
+
+# 旧工作区（pre-clean-v1），只读：M0 预测、旧图像与旧面板，用于对账和图像缺陷评估
+PRE_CLEAN_WORK_DIR = os.environ.get('CNN_TRADING_PRE_CLEAN_WORK_DIR', r'F:\LLM_trading\CNN_trading\WORK_SPACE')
 
 # 缓存目录（SPY 期末等）
 CACHE_DIR = os.path.join(_TREND_SUBMIT, 'CACHE_DIR')
@@ -133,9 +144,8 @@ SPX_CSV_ENCODING = 'gbk'
 CSI800_CSV_ENCODING = 'gbk'
 ASHARE_CSV_ENCODING = 'utf-8-sig'
 
-# A股涨跌停限制（±10%，保留少量缓冲）
+# CSI800 旧流程的日收益裁剪；A 股全市场干净版本不裁剪（clean_spec D1）
 CSI800_RET_CLIP = 0.11
-ASHARE_RET_CLIP = 0.11
 
 # 确保工作目录存在
 for _d in [WORK_DIR, PROCESSED_DATA_DIR, CSI800_PROCESSED_DATA_DIR,

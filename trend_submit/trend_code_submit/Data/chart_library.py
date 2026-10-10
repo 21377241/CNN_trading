@@ -4,6 +4,10 @@ Data/chart_library.py - 图表绘制库
 
 DrawOHLC: 将归一化后的 OHLCV + 均线数据绘制成灰度 PIL Image。
 支持 bar（K 线柱状）/ pixel / centered_pixel 三种图表类型。
+
+bar 图的画法由 bar_style 决定：
+  'ohlc'           Jiang (2023) 的 OHLC 刻度画法（Data/ohlc_render.py），默认
+  'legacy_candle'  旧画法：3 像素宽时实体被高低价竖线覆盖，图中没有开盘价和收盘价；仅用于复现旧结果
 """
 import os
 import sys
@@ -22,6 +26,9 @@ from Data.dgp_config import (
     VOLUME_CHART_GAP, VOLUME_CHART_HEIGHT_RATIO,
     BACKGROUND_COLOR, CHART_COLOR
 )
+from Data.ohlc_render import render_ohlc_batch
+
+BAR_STYLES = ('ohlc', 'legacy_candle')
 
 
 class DrawOHLC:
@@ -37,6 +44,7 @@ class DrawOHLC:
         chart_type: 'bar' | 'pixel' | 'centered_pixel'
         img_width: 覆盖默认图像宽度（像素）
         img_height: 覆盖默认图像高度（像素）
+        bar_style: 'ohlc' | 'legacy_candle'（仅 chart_type='bar' 时生效）
     """
 
     def __init__(self,
@@ -46,13 +54,17 @@ class DrawOHLC:
                  has_volume_bar: bool = True,
                  chart_type: str = 'bar',
                  img_width: int = None,
-                 img_height: int = None):
+                 img_height: int = None,
+                 bar_style: str = 'ohlc'):
+        if bar_style not in BAR_STYLES:
+            raise ValueError(f'bar_style 须为 {BAR_STYLES}，得到 {bar_style}')
         self.df = ohlcv_df.reset_index(drop=True)
         self.T = len(self.df)
         self.window_size = window_size
         self.ma_cols = ma_cols or []
         self.has_volume_bar = has_volume_bar and ('Vol' in self.df.columns)
         self.chart_type = chart_type
+        self.bar_style = bar_style
 
         self.img_width = img_width or IMAGE_WIDTH.get(window_size, window_size * BAR_WIDTH)
         self.img_height = img_height or IMAGE_HEIGHT.get(window_size, 64)
@@ -74,6 +86,8 @@ class DrawOHLC:
     # ─────────────────────────────────────────────
     def draw(self) -> Image.Image:
         """绘制并返回 PIL Image (mode='L', 尺寸 img_width × img_height)"""
+        if self.chart_type == 'bar' and self.bar_style == 'ohlc':
+            return Image.fromarray(self._draw_ohlc_array(), mode='L')
         img = Image.new('L', (self.img_width, self.img_height), BACKGROUND_COLOR)
         draw = ImageDraw.Draw(img)
 
@@ -128,6 +142,22 @@ class DrawOHLC:
     # ─────────────────────────────────────────────
     # 内部绘制方法
     # ─────────────────────────────────────────────
+    def _draw_ohlc_array(self) -> np.ndarray:
+        if len(self.ma_cols) > 1:
+            raise ValueError("bar_style='ohlc' 只支持一条均线")
+        ohlc = self._get_ohlc_arrays()
+        if ohlc is None:
+            return np.full((self.img_height, self.img_width), BACKGROUND_COLOR, dtype=np.uint8)
+        o, h, l, c = (a[None, :] for a in ohlc)
+        ma = None
+        if self.ma_cols and self.ma_cols[0] in self.df.columns:
+            ma = self.df[self.ma_cols[0]].values.astype(float)[None, :]
+        vol = self.df['Vol'].values.astype(float)[None, :] if self.has_volume_bar else None
+        img = render_ohlc_batch(o, h, l, c, ma, vol, has_volume=self.has_volume_bar)[0]
+        if img.shape != (self.img_height, self.img_width):
+            raise ValueError(f'图像尺寸 {img.shape} 与设定 {(self.img_height, self.img_width)} 不一致')
+        return img
+
     def _get_ohlc_arrays(self):
         """提取 OHLC 数组，做基本校验"""
         required = ['Open', 'High', 'Low', 'Close']
