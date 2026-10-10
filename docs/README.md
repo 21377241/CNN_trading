@@ -60,6 +60,7 @@
 | MLP 稳定性 | [paper_results_mlp_stability.md](results/paper_results_mlp_stability.md)、[paper_mlp_single_vs_bagged.md](results/paper_mlp_single_vs_bagged.md) | 待重算（旧 Sharpe 口径） |
 | MLP-4 替换 | [mlp4_propagation_audit.md](results/mlp4_propagation_audit.md) | 现行 |
 | 口径统一 | [paper_standardized_results_update.md](results/paper_standardized_results_update.md) | 现行 |
+| E7 | [paper_results_E7.md](results/paper_results_E7.md) | 现行（按冻结协议运行；H1、H3 成立，H2 不成立） |
 
 ## repro/：Jiang et al. (2023) 复现阶段
 

@@ -23,17 +23,17 @@
 | E5 / E5T | 特有信号的经济机制 | `E5_mechanism/` | `E5_mechanism_*`、`E5T_cnn_1d_mechanism/` | [results/paper_results_E5.md](../docs/results/paper_results_E5.md) |
 | E6A | CNN 与 MLP-4 的状态依赖相对优势 | `E6A_state_advantage/` | `E6A_state_advantage/` | [results/paper_E6A_state_dependent_comparative_advantage.md](../docs/results/paper_E6A_state_dependent_comparative_advantage.md) |
 | E0 | 模型登记、口径对账、数据与执行时点审计 | `E0_audit/` | `E0_audit/` | [protocol/](../docs/protocol/) |
+| E7 | 传统控制变量下的增量预测信息（按冻结协议） | `E7_incremental/` | `E7_incremental/` | [results/paper_results_E7.md](../docs/results/paper_results_E7.md) |
 
 ## 待开展（JEF 投稿计划）
 
 | ID | 内容 | 目录 | 协议或设计 |
 |---|---|---|---|
-| E7 | 传统控制变量下的增量预测信息（Fama–MacBeth、残差 Rank IC、条件双重排序） | `E7_incremental/` | [protocol/E7_protocol.md](../docs/protocol/E7_protocol.md)（已冻结） |
 | E9 | 可交易性与执行：次日开盘成交、涨跌停与停牌约束、交易成本、换手 | `E9_tradable/` | 待写 |
 | E8 | 风险调整后的价值：自建的规模、价值、动量、反转、流动性因子 | `E8_risk_adjusted/` | 待写 |
 | E10 | 组合增量：固定组合规则 + block bootstrap 置信区间 | `E10_combination/` | 待写 |
 
-执行顺序为 E7、E9、E8、E10，之后重写全文。
+执行顺序为 E9、E8、E10，之后重写全文。E7 的结论是 chart-CNN 的增量信息被 1D-CNN 包含，所以后续实验以 1D-CNN 为主要对象，chart-CNN 作为对照。E7 新建的扩展日面板、执行一致收益和控制变量面板（`E7_incremental/build_*.py`）供 E8–E10 复用。
 
 ## 复现示例
 
