@@ -64,7 +64,7 @@ def weekly_fm(prep: pd.DataFrame, specs: dict[str, list[str]], weight: str | Non
             {s: pd.DataFrame(v).set_index('ending_date') for s, v in r2.items()})
 
 
-def summarize(variant: str, specs: dict, betas: dict, r2: dict) -> tuple[list, list, list]:
+def summarize(variant: str, specs: dict, betas: dict, r2: dict, increments=INCREMENTS) -> tuple[list, list, list]:
     coefs, r2rows, inc = [], [], []
     for s, cols in specs.items():
         B = betas[s]
@@ -82,7 +82,7 @@ def summarize(variant: str, specs: dict, betas: dict, r2: dict) -> tuple[list, l
                           'avg_n': float(r2[s]['n'].mean())})
         r2rows.append({'variant': variant, 'spec': s, 'r2_mean': float(r2[s]['r2'].mean()),
                        'adj_r2_mean': float(r2[s]['adj_r2'].mean()), 'n_weeks': len(r2[s])})
-    for a, b in INCREMENTS:
+    for a, b in increments:
         if a in r2 and b in r2 and not r2[a].empty and not r2[b].empty:
             d = (r2[a]['r2'] - r2[b]['r2']).dropna()
             da = (r2[a]['adj_r2'] - r2[b]['adj_r2']).dropna()
@@ -96,21 +96,50 @@ def summarize(variant: str, specs: dict, betas: dict, r2: dict) -> tuple[list, l
 
 
 def run_variant(name: str, df: pd.DataFrame, acc: dict, *, ctrl_a=CTRL_A, ctrl_b=CTRL_B, extra=None, y='ret_oo',
-                transform='rank', fe=True, y_winsor=False, weight=None, weeks: tuple | None = None) -> dict:
+                transform='rank', fe=True, y_winsor=False, weight=None, weeks: tuple | None = None,
+                spec_fn=make_specs, increments=INCREMENTS) -> dict:
     t0 = time.time()
-    specs = make_specs(list(ctrl_a), list(ctrl_b), extra)
+    specs = spec_fn(list(ctrl_a), list(ctrl_b), extra)
     x_cols = list(dict.fromkeys(sum(specs.values(), [])))
     keep = (weight,) if weight else ()
     prep = prepare(df, x_cols, y=y, transform=transform, fe=fe, y_winsor=y_winsor, keep=keep)
     if weeks:
         prep = prep[(prep['ending_date'] >= weeks[0]) & (prep['ending_date'] <= weeks[1])]
     betas, r2 = weekly_fm(prep, specs, weight)
-    c, r, i = summarize(name, specs, betas, r2)
+    c, r, i = summarize(name, specs, betas, r2, increments)
     acc['coefs'] += c
     acc['r2'] += r
     acc['inc'] += i
     print(f'[{name}] rows={len(prep):,} weeks={prep["ending_date"].nunique()} {time.time() - t0:.0f}s')
     return betas
+
+
+def run_robustness(df: pd.DataFrame, main_df: pd.DataFrame, acc: dict, **kw) -> None:
+    """Protocol section 8 robustness, in order. `df` is the full merged sample (for r8), `main_df` the main sample."""
+    run_variant('r1_y_ret_cc', main_df, acc, y='ret_cc', **kw)
+    run_variant('r1_y_ret_val', main_df, acc, y='ret_val', **kw)
+    run_variant('r2_y_winsor', main_df, acc, y_winsor=True, **kw)
+    run_variant('r3_winsor_z', main_df, acc, transform='wz', **kw)
+    run_variant('r4_no_valuation', main_df, acc, ctrl_b=[c for c in CTRL_B if c not in CTRL_VALUATION], **kw)
+    run_variant('r4_no_industry_fe', main_df, acc, fe=False, **kw)
+    for name, (a, b) in SUBPERIODS.items():
+        run_variant(f'r5_sub_{name}', main_df, acc, weeks=(pd.Timestamp(a), pd.Timestamp(b)), **kw)
+    mv_rank = main_df.groupby('ending_date')['FloatMV'].rank(pct=True)
+    run_variant('r6_drop_small30', main_df[mv_rank > 0.30], acc, **kw)
+    run_variant('r6_drop_age_lt_1y', main_df[main_df['age_days'] >= 365], acc, **kw)
+    run_variant('r6_drop_limit_sig', main_df[~(main_df['limit_up_sig'] | main_df['limit_dn_sig'])], acc, **kw)
+    run_variant('r6_drop_entry_lock_up', main_df[~main_df['entry_lock_up'].astype(bool)], acc, **kw)
+    run_variant('r7_delist_minus50', main_df, acc, y='ret_oo_d50', **kw)
+
+    full = df[df['ret_oo'].notna() & df[CTRL_A].notna().all(axis=1) & (df['industry'] != 'nan')].copy()
+    miss = []
+    for c in CTRL_B:
+        if full[c].isna().any():
+            full[f'miss_{c}'] = full[c].isna().astype(float)
+            full[c] = full[c].fillna(full.groupby('ending_date')[c].transform('median'))
+            miss.append(f'miss_{c}')
+    run_variant('r8_full_sample_impute', full, acc, extra=miss, **kw)
+    run_variant('r9_wls_floatmv', main_df, acc, weight='FloatMV', **kw)
 
 
 def main() -> int:
@@ -125,32 +154,7 @@ def main() -> int:
     pd.concat({s: b for s, b in betas.items()}, names=['spec']).reset_index().to_feather(
         OUT_DATA / 'fm_weekly_betas_main.feather')
 
-    # Protocol section 8 robustness, in order
-    run_variant('r1_y_ret_cc', main_df, acc, y='ret_cc')
-    run_variant('r1_y_ret_val', main_df, acc, y='ret_val')
-    run_variant('r2_y_winsor', main_df, acc, y_winsor=True)
-    run_variant('r3_winsor_z', main_df, acc, transform='wz')
-    run_variant('r4_no_valuation', main_df, acc, ctrl_b=[c for c in CTRL_B if c not in CTRL_VALUATION])
-    run_variant('r4_no_industry_fe', main_df, acc, fe=False)
-    for name, (a, b) in SUBPERIODS.items():
-        run_variant(f'r5_sub_{name}', main_df, acc, weeks=(pd.Timestamp(a), pd.Timestamp(b)))
-    mv_rank = main_df.groupby('ending_date')['FloatMV'].rank(pct=True)
-    run_variant('r6_drop_small30', main_df[mv_rank > 0.30], acc)
-    run_variant('r6_drop_age_lt_1y', main_df[main_df['age_days'] >= 365], acc)
-    run_variant('r6_drop_limit_sig', main_df[~(main_df['limit_up_sig'] | main_df['limit_dn_sig'])], acc)
-    run_variant('r6_drop_entry_lock_up', main_df[~main_df['entry_lock_up'].astype(bool)], acc)
-    run_variant('r7_delist_minus50', main_df, acc, y='ret_oo_d50')
-
-    full = df[df['ret_oo'].notna() & df[CTRL_A].notna().all(axis=1) & (df['industry'] != 'nan')].copy()
-    miss = []
-    for c in CTRL_B:
-        if full[c].isna().any():
-            full[f'miss_{c}'] = full[c].isna().astype(float)
-            full[c] = full[c].fillna(full.groupby('ending_date')[c].transform('median'))
-            miss.append(f'miss_{c}')
-    full_specs_extra = miss
-    run_variant('r8_full_sample_impute', full, acc, extra=full_specs_extra)
-    run_variant('r9_wls_floatmv', main_df, acc, weight='FloatMV')
+    run_robustness(df, main_df, acc)
 
     coefs = pd.DataFrame(acc['coefs'])
     coefs.to_csv(OUT / 'fm_coefs.csv', index=False)

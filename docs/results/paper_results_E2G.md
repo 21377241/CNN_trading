@@ -80,4 +80,6 @@ E2G 只控制了可训练参数量，没有匹配 FLOPs、activation size、优�
 
 > The exercise isolates one important dimension of capacity mismatch rather than claiming complete architectural equivalence.
 
+E2G 只比较了单模型表现。ChartCNN-S 在传统控制变量和 1D-CNN 下的增量检验见 [paper_results_E7.md](paper_results_E7.md) 第 10 节：S 与完整模型一样被 1D-CNN 包含。
+
 结果支持的表述是：参数量失配不是 chart-CNN 弱于数值模型的合理解释。剩下的差距更可能来自表示方式（图像 vs 数值序列）、二维归纳偏置或优化难度。E2G 不能区分这几种来源。设计文档中的对称检验（按同一规则扩大 1D-CNN）尚未运行。

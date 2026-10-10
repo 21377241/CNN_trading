@@ -32,13 +32,12 @@ def stats(x: pd.Series) -> dict:
             'sharpe_ann': annualized_sharpe(x.to_numpy()), 'n_weeks': int(x.notna().sum())}
 
 
-def main() -> int:
-    df = load_sample()
-    df = df[df['in_main']][['ending_date', 'ret_oo', *COND, *SCORES]].reset_index(drop=True)
+def double_sort(df: pd.DataFrame, scores: list[str]) -> pd.DataFrame:
+    df = df[['ending_date', 'ret_oo', *COND, *scores]].reset_index(drop=True)
     rows = []
     for cond in COND:
         df['q'] = bucket(df, cond, ['ending_date'], 5)
-        for k in SCORES:
+        for k in scores:
             df['dec'] = bucket(df, k, ['ending_date', 'q'], 10)
             ext = df[df['dec'].isin([0, 9])].groupby(['ending_date', 'q', 'dec'])['ret_oo'].mean().unstack('dec')
             hl = (ext[9] - ext[0]).rename('hl')
@@ -46,7 +45,12 @@ def main() -> int:
             rows.append({'score': k, 'cond': cond, 'quintile': 'avg', **stats(avg)})
             for q, s in hl.groupby('q'):
                 rows.append({'score': k, 'cond': cond, 'quintile': int(q) + 1, **stats(s.droplevel('q'))})
-    out = pd.DataFrame(rows)
+    return pd.DataFrame(rows)
+
+
+def main() -> int:
+    df = load_sample()
+    out = double_sort(df[df['in_main']], SCORES)
     out.to_csv(OUT / 'double_sort.csv', index=False)
     write_manifest('run_double_sort', {'cond': COND})
     avg = out[out['quintile'] == 'avg']
