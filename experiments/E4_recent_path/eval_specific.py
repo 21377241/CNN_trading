@@ -10,7 +10,7 @@ import pandas as pd
 from experiments.common.metrics import cross_section_ic, summarize_ic
 from experiments.E2_matched_tabular.run_eval import parse_hl_sharpe
 from experiments.E4_recent_path.paths import ANN, OUT_ROOT
-from Portfolio.portfolio import run_portfolio_analysis
+from Portfolio.portfolio import run_portfolio_analysis, write_port_input
 
 logger = logging.getLogger('e4_eval')
 
@@ -26,8 +26,7 @@ def eval_specific_df(
     ic = summarize_ic(cross_section_ic(df, 'up_prob'))
     mdir = os.path.join(out_dir, tag)
     os.makedirs(mdir, exist_ok=True)
-    tmp = os.path.join(mdir, 'pred_for_port.csv')
-    df.to_csv(tmp, index=False)
+    tmp = write_port_input(df, mdir)
     run_portfolio_analysis(result_files=[tmp], output_dir=mdir, n_ensembles=5, n_decile=10, ann_factor=ANN)
     hl = parse_hl_sharpe(os.path.join(mdir, 'portfolio_summary.txt'))
     return {'tag': tag, **ic, **hl, 'n': len(df)}

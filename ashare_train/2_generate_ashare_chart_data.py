@@ -40,6 +40,7 @@ from Misc.config import (  # noqa: E402
 )
 from Data.clean_window import (  # noqa: E402
     WINDOW, close0_path, features_140, gather_windows, load_grid, ma_out_of_range_share, render_window_images,
+    universe_meta,
 )
 from Data.dgp_config import get_dataset_dir, get_dataset_filename  # noqa: E402
 
@@ -51,8 +52,6 @@ BATCH = 40_000
 IMG_SIZE = 64 * 60
 IS_YEARS = list(range(2000, 2008))
 OOS_YEARS = list(range(2008, 2026))
-META_COLS = ['StockID', 'ending_date', 'ret_val', 'binary_label', 'label_raw', 'MarketCap', 'split', 'embargo',
-             'n_obs_in_win', 'board', 'next_date', 'year']
 
 
 def image_dir() -> str:
@@ -63,22 +62,12 @@ def feature_dir() -> str:
     return os.path.join(CLEAN_INPUTS_DIR, 'features140')
 
 
-def year_meta(u: pd.DataFrame) -> pd.DataFrame:
-    m = u.rename(columns={'ret_label': 'ret_val', 'label': 'label_raw'}).copy()
-    m['StockID'] = m['StockID'].astype(str)
-    bl = m['label_raw'].astype(np.int64)
-    m['binary_label'] = np.where((bl < 0) | (m['embargo'] == 1), -99, bl).astype(np.int64)
-    m['split'] = m['split'].astype(str)
-    m['board'] = m['board'].astype(str)
-    return m[META_COLS].reset_index(drop=True)
-
-
 def process_year(grid, u: pd.DataFrame, year: int, force: bool) -> dict:
     d = image_dir()
     p_img = os.path.join(d, get_dataset_filename(WINDOW, 'week', True, [20], year, '_images.dat'))
     p_lbl = os.path.join(d, get_dataset_filename(WINDOW, 'week', True, [20], year, '_labels.feather'))
     p_x = os.path.join(feature_dir(), 'by_year', f'X_{year}.npy')
-    meta = year_meta(u)
+    meta = universe_meta(u)
     n = len(meta)
     if not force and all(os.path.exists(p) for p in (p_img, p_lbl, p_x)):
         logger.info(f'{year}: 已存在，跳过')

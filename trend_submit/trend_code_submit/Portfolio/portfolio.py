@@ -34,15 +34,33 @@ warnings.filterwarnings('ignore')
 # ─────────────────────────────────────────────
 # 核心分析函数
 # ─────────────────────────────────────────────
+PORT_INPUT_COLS = ['StockID', 'ending_date', 'up_prob', 'ret_val', 'MarketCap']
+
+
+def write_port_input(df: pd.DataFrame, out_dir: str) -> str:
+    """组合分析的输入只保留必要列，存为 parquet（旧版每个组合目录写一份完整 CSV，占用数百 GB）。"""
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, 'pred_for_port.parquet')
+    out = df[[c for c in PORT_INPUT_COLS if c in df.columns]].copy()
+    if 'StockID' in out.columns:
+        out['StockID'] = out['StockID'].astype(str)
+    out.to_parquet(path, index=False)
+    return path
+
+
+def _read_result_file(fp: str) -> pd.DataFrame:
+    return pd.read_parquet(fp) if fp.endswith('.parquet') else pd.read_csv(fp)
+
+
 def _load_results(result_files: list) -> pd.DataFrame:
-    """读取并合并多个 ensem*_res_*.csv"""
+    """读取并合并多个 ensem*_res_*.csv 或 pred_for_port.parquet"""
     dfs = []
     for fp in result_files:
         if not os.path.exists(fp):
             logger.warning(f"文件不存在: {fp}")
             continue
         try:
-            df = pd.read_csv(fp)
+            df = _read_result_file(fp)
             dfs.append(df)
             logger.info(f"加载: {fp}，行数: {len(df)}")
         except Exception as e:

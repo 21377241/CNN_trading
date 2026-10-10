@@ -34,7 +34,7 @@ if CODE_PKG not in sys.path:
 from experiments.common.metrics import cross_section_ic, summarize_ic
 from experiments.E2_matched_tabular.e2a_layout import CHRONO_RIC, ws
 from experiments.E2_matched_tabular.run_eval import parse_hl_sharpe
-from Portfolio.portfolio import run_portfolio_analysis
+from Portfolio.portfolio import run_portfolio_analysis, write_port_input
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger('e2b')
@@ -329,8 +329,7 @@ def step_resid(panel: pd.DataFrame, out_dir: str, partner: str):
         df['up_prob'] = df.groupby('ending_date')['up_prob'].rank(pct=True)
         mdir = os.path.join(port_root, label)
         os.makedirs(mdir, exist_ok=True)
-        tmp = os.path.join(mdir, 'pred_for_port.csv')
-        df.to_csv(tmp, index=False)
+        tmp = write_port_input(df, mdir)
         run_portfolio_analysis(
             result_files=[tmp], output_dir=mdir, n_ensembles=5, n_decile=10, ann_factor=ANN,
         )
@@ -360,8 +359,7 @@ def step_ens(panel: pd.DataFrame, out_dir: str, partner: str):
         d['up_prob'] = scores
         mdir = os.path.join(port_root, name)
         os.makedirs(mdir, exist_ok=True)
-        tmp = os.path.join(mdir, 'pred_for_port.csv')
-        d.to_csv(tmp, index=False)
+        tmp = write_port_input(d, mdir)
         run_portfolio_analysis(
             result_files=[tmp], output_dir=mdir, n_ensembles=5, n_decile=10, ann_factor=ANN,
         )

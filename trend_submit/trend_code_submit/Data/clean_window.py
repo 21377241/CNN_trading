@@ -22,6 +22,19 @@ from Data.ohlc_render import price_bounds, render_ohlc_batch
 WINDOW = 20
 FEATURE_NAMES = ('O', 'H', 'L', 'C', 'MA20', 'V', 'has_trade')
 PER_DAY = len(FEATURE_NAMES)
+META_COLS = ['StockID', 'ending_date', 'ret_val', 'binary_label', 'label_raw', 'MarketCap', 'split', 'embargo',
+             'n_obs_in_win', 'board', 'next_date', 'year']
+
+
+def universe_meta(u: pd.DataFrame) -> pd.DataFrame:
+    """universe 行 → 图像 labels / 特征 meta。binary_label 在无标签或 embargo 行为 -99。"""
+    m = u.rename(columns={'ret_label': 'ret_val', 'label': 'label_raw'}).copy()
+    m['StockID'] = m['StockID'].astype(str)
+    bl = m['label_raw'].astype(np.int64)
+    m['binary_label'] = np.where((bl < 0) | (m['embargo'] == 1), -99, bl).astype(np.int64)
+    m['split'] = m['split'].astype(str)
+    m['board'] = m['board'].astype(str)
+    return m[META_COLS].reset_index(drop=True)
 
 
 @dataclass

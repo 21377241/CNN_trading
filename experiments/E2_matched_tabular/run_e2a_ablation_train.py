@@ -38,7 +38,7 @@ from experiments.common.splits import chrono_train_val_indices
 from experiments.E2_matched_tabular.e2a_layout import ABLATION_COLS, FEAT_180, ws
 from experiments.E2_matched_tabular.run_eval import parse_hl_sharpe
 from experiments.E2_matched_tabular.run_train import predict_proba_pos, _write_oos_pred
-from Portfolio.portfolio import run_portfolio_analysis
+from Portfolio.portfolio import run_portfolio_analysis, write_port_input
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger('e2a_ablation')
@@ -133,8 +133,7 @@ def train_one(ablation: str, cfg: dict):
         ic_sum = summarize_ic(cross_section_ic(df, 'up_prob'))
         mdir = os.path.join(port_root, name)
         os.makedirs(mdir, exist_ok=True)
-        tmp = os.path.join(mdir, 'pred_for_port.csv')
-        df.to_csv(tmp, index=False)
+        tmp = write_port_input(df, mdir)
         run_portfolio_analysis(
             result_files=[tmp], output_dir=mdir, n_ensembles=5, n_decile=10, ann_factor=cfg['ann_factor'],
         )

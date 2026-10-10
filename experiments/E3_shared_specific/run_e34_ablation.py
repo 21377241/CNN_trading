@@ -27,7 +27,7 @@ from experiments.E2_matched_tabular.mlp_bagging import bag_predict_proba, fit_ml
 from experiments.E2_matched_tabular.run_eval import parse_hl_sharpe
 from experiments.E2_matched_tabular.run_train import predict_proba_pos
 from experiments.E3_shared_specific.paths import ANN, HISTGB_FROZEN, MIN_CS_N, OUT_ROOT, PRED_ROOT
-from Portfolio.portfolio import run_portfolio_analysis
+from Portfolio.portfolio import run_portfolio_analysis, write_port_input
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger('e3_e34')
@@ -113,8 +113,7 @@ def _eval_tab_specific(
     ic = summarize_ic(cross_section_ic(df, 'up_prob'))
     mdir = os.path.join(out_dir, name)
     os.makedirs(mdir, exist_ok=True)
-    tmp = os.path.join(mdir, 'pred_for_port.csv')
-    df.to_csv(tmp, index=False)
+    tmp = write_port_input(df, mdir)
     run_portfolio_analysis(result_files=[tmp], output_dir=mdir, n_ensembles=5, n_decile=10, ann_factor=ANN)
     hl = parse_hl_sharpe(os.path.join(mdir, 'portfolio_summary.txt'))
     return {'ablation': name, 'model': model, **ic, **hl, 'n': len(df)}

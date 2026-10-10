@@ -31,7 +31,7 @@ from experiments.common.metrics import cross_section_ic, summarize_ic
 from experiments.E2_matched_tabular.e2a_layout import FEAT_180
 from experiments.E2_matched_tabular.run_eval import parse_hl_sharpe
 from experiments.E3_shared_specific.paths import ANN, E1B_RIC_EXP, MIN_CS_N, OUT_ROOT, WINDOW
-from Portfolio.portfolio import run_portfolio_analysis
+from Portfolio.portfolio import run_portfolio_analysis, write_port_input
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger('e3_e33')
@@ -164,8 +164,7 @@ def _eval_specific(name: str, sp_df: pd.DataFrame, out_root: str) -> dict:
     ic = summarize_ic(cross_section_ic(df, 'up_prob'))
     mdir = os.path.join(out_root, name)
     os.makedirs(mdir, exist_ok=True)
-    tmp = os.path.join(mdir, 'pred_for_port.csv')
-    df.to_csv(tmp, index=False)
+    tmp = write_port_input(df, mdir)
     run_portfolio_analysis(result_files=[tmp], output_dir=mdir, n_ensembles=5, n_decile=10, ann_factor=ANN)
     hl = parse_hl_sharpe(os.path.join(mdir, 'portfolio_summary.txt'))
     return {'perturb': name, **ic, **hl, 'n': len(df)}

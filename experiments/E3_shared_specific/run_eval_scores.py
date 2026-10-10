@@ -19,7 +19,7 @@ from experiments.common.metrics import cross_section_ic, summarize_ic
 from experiments.E2_matched_tabular.run_eval import parse_hl_sharpe
 from experiments.E3_shared_specific.paths import ANN, OUT_ROOT
 from experiments.E3_shared_specific.utils import newey_west_t
-from Portfolio.portfolio import run_portfolio_analysis
+from Portfolio.portfolio import run_portfolio_analysis, write_port_input
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger('e3_eval')
@@ -44,8 +44,7 @@ def run_eval(scores_path: str | None = None) -> pd.DataFrame:
         t_ic, p_ic = newey_west_t(ic_df['rank_ic'].values, lag=4)
         mdir = os.path.join(port_root, col)
         os.makedirs(mdir, exist_ok=True)
-        tmp = os.path.join(mdir, 'pred_for_port.csv')
-        df.to_csv(tmp, index=False)
+        tmp = write_port_input(df, mdir)
         run_portfolio_analysis(
             result_files=[tmp], output_dir=mdir, n_ensembles=5, n_decile=10, ann_factor=ANN,
         )

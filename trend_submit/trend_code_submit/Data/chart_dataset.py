@@ -40,7 +40,12 @@ class EquityDataset(Dataset):
         country: 国家标识
         image_scale: 图像归一化方式 'norm255'(除255) | 'standardize' | 'none'
         label_col: 标签列名，默认 'binary_label'
+        sample_mode: 'legacy'  旧规则：剔除 label = -99 与 EWMA_vol = 0（仅用于复现旧结果）
+                     'train'   训练/验证：只保留 label ∈ {0, 1}，剔除 embargo = 1
+                     'oos'     OOS 打分：不过滤，样本键与 labels 文件（即 universe）完全一致
     """
+
+    SAMPLE_MODES = ('legacy', 'train', 'oos')
 
     def __init__(self,
                  years: list,
@@ -52,7 +57,11 @@ class EquityDataset(Dataset):
                  country: str = COUNTRY,
                  image_scale: str = 'norm255',
                  label_col: str = 'binary_label',
-                 dataset_dir: str = None):
+                 dataset_dir: str = None,
+                 sample_mode: str = 'legacy'):
+        if sample_mode not in self.SAMPLE_MODES:
+            raise ValueError(f'sample_mode 须为 {self.SAMPLE_MODES}，得到 {sample_mode}')
+        self.sample_mode = sample_mode
         """
         Args:
             dataset_dir: 图表数据集目录（可选）。
@@ -76,8 +85,8 @@ class EquityDataset(Dataset):
 
         self.dataset_dir = dataset_dir if dataset_dir is not None else get_dataset_dir(country)
 
-        # 加载所有年份的数据
-        self._images: np.ndarray = None   # (N, H, W) float32
+        # 加载所有年份的数据；norm255 时以 uint8 驻留内存，取样本时再除以 255
+        self._images: np.ndarray = None   # (N, 1, H, W) uint8 或 float32
         self._labels: np.ndarray = None   # (N,) int64
         self._meta: pd.DataFrame = None   # 元数据
         self._load_all()
@@ -107,49 +116,62 @@ class EquityDataset(Dataset):
             if N == 0:
                 continue
 
-            # 读取 memmap
+            mask = self._sample_mask(meta)
             mmap = np.memmap(p_img, dtype='uint8', mode='r', shape=(N, self.img_size))
-            imgs = np.array(mmap, dtype=np.float32)  # copy to RAM
+            imgs = np.asarray(mmap[mask]) if not mask.all() else np.array(mmap)
             del mmap
 
             img_list.append(imgs)
-            meta_list.append(meta)
+            meta_list.append(meta[mask].reset_index(drop=True))
 
         if not img_list:
             raise RuntimeError(f"未找到任何有效数据，年份: {self.years}")
 
-        imgs_all = np.concatenate(img_list, axis=0)  # (N, H*W)
+        imgs_all = np.concatenate(img_list, axis=0)  # (N, H*W) uint8
         meta_all = pd.concat(meta_list, ignore_index=True)
 
-        # 过滤无效样本：label=-99 或 EWMA_vol=0
-        valid_mask = (meta_all[self.label_col] != -99)
-        if 'EWMA_vol' in meta_all.columns:
-            valid_mask &= (meta_all['EWMA_vol'] > 0)
+        if self.image_scale == 'standardize':
+            imgs_all = imgs_all.astype(np.float32)
+            imgs_all = (imgs_all - imgs_all.mean()) / (imgs_all.std() + 1e-8)
+        elif self.image_scale == 'none':
+            imgs_all = imgs_all.astype(np.float32)
 
-        imgs_all = imgs_all[valid_mask.values]
-        meta_all = meta_all[valid_mask].reset_index(drop=True)
-
-        # 图像归一化
-        if self.image_scale == 'norm255':
-            imgs_all /= 255.0
-        elif self.image_scale == 'standardize':
-            mean = imgs_all.mean()
-            std = imgs_all.std() + 1e-8
-            imgs_all = (imgs_all - mean) / std
-
-        # reshape 为 (N, 1, H, W)
         self._images = imgs_all.reshape(-1, 1, self.img_h, self.img_w)
         self._labels = meta_all[self.label_col].values.astype(np.int64)
         self._meta = meta_all
 
-        print(f"[EquityDataset] 年份 {self.years}: 共 {len(self._labels)} 条有效样本，"
-              f"正例 {(self._labels == 1).sum()}，负例 {(self._labels == 0).sum()}")
+        n_pos, n_neg = int((self._labels == 1).sum()), int((self._labels == 0).sum())
+        share = n_pos / max(n_pos + n_neg, 1)
+        print(f"[EquityDataset] 年份 {self.years} ({self.sample_mode}): 共 {len(self._labels)} 条样本，"
+              f"正例 {n_pos}，负例 {n_neg}，上涨比例 {share:.4f}")
+
+    def _sample_mask(self, meta: pd.DataFrame) -> np.ndarray:
+        if self.sample_mode == 'oos':
+            return np.ones(len(meta), dtype=bool)
+        if self.sample_mode == 'legacy':
+            m = meta[self.label_col] != -99
+            if 'EWMA_vol' in meta.columns:
+                m &= meta['EWMA_vol'] > 0
+            return m.to_numpy()
+        m = meta[self.label_col].isin([0, 1])
+        if 'embargo' in meta.columns:
+            m &= meta['embargo'] == 0
+        return m.to_numpy()
+
+    @property
+    def up_share(self) -> float:
+        lab = self._labels[(self._labels == 0) | (self._labels == 1)]
+        return float(lab.mean()) if len(lab) else float('nan')
 
     def __len__(self):
         return len(self._labels)
 
     def __getitem__(self, idx):
-        img = torch.tensor(self._images[idx], dtype=torch.float32)
+        x = self._images[idx]
+        if x.dtype == np.uint8:
+            img = torch.from_numpy(x.astype(np.float32) / 255.0)
+        else:
+            img = torch.tensor(x, dtype=torch.float32)
         lbl = torch.tensor(self._labels[idx], dtype=torch.long)
         return img, lbl
 

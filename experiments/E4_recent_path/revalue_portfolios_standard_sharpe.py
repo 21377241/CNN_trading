@@ -23,7 +23,8 @@ def stats(x):
 
 
 def value(path, make_plots=True):
-    d = pd.read_csv(path, usecols=['ending_date', 'ret_val', 'MarketCap', 'up_prob'])
+    cols = ['ending_date', 'ret_val', 'MarketCap', 'up_prob']
+    d = pd.read_parquet(path, columns=cols) if path.endswith('.parquet') else pd.read_csv(path, usecols=cols)
     d = d.dropna(subset=['ending_date', 'ret_val', 'up_prob'])
     d['ending_date'] = pd.to_datetime(d['ending_date'])
     ew, vw = [], []
@@ -77,7 +78,8 @@ def write_summary(out_dir, ew, vw):
 
 
 def main():
-    files = glob.glob(os.path.join(OUT, '**', 'pred_for_port.csv'), recursive=True)
+    files = sorted(glob.glob(os.path.join(OUT, '**', 'pred_for_port.parquet'), recursive=True) +
+                   glob.glob(os.path.join(OUT, '**', 'pred_for_port.csv'), recursive=True))
     rows = []
     for i, path in enumerate(files, 1):
         out_dir = os.path.dirname(path)

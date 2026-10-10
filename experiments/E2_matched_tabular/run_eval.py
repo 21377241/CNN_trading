@@ -20,7 +20,7 @@ if CODE_PKG not in sys.path:
     sys.path.insert(0, CODE_PKG)
 
 from experiments.common.metrics import cross_section_ic, summarize_ic, yearly_rank_ic_mean
-from Portfolio.portfolio import run_portfolio_analysis
+from Portfolio.portfolio import run_portfolio_analysis, write_port_input
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger('e2_eval')
@@ -133,8 +133,7 @@ def main(argv=None):
         # portfolio
         mdir = os.path.join(port_root, m)
         os.makedirs(mdir, exist_ok=True)
-        tmp = os.path.join(mdir, 'pred_for_port.csv')
-        df.to_csv(tmp, index=False)
+        tmp = write_port_input(df, mdir)
         run_portfolio_analysis(
             result_files=[tmp],
             output_dir=mdir,
