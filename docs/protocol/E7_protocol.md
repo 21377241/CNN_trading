@@ -223,6 +223,7 @@
 | 2026-10-11 | 进场日一字涨停：主规格保留并标记 `entry_lock_up`，只在第 8 节第 6 项的稳健性检验中剔除 | 第 3 节写有“ret_oo 缺失”，与第 8 节“只在稳健性检验中剔除”不一致，按第 8 节执行 | 否 |
 | 2026-10-11 | 增量 R² 表中补充调整 R² 的增量及其 NW t、改善周数占比 | 周内 R² 增量在机制上必然非负，原指标的 t 值没有信息量；只是补充报告项，不改变第 7 节的判定 | **是**（看到主结果后补充） |
 | 2026-10-11 | 第 6.1 节的标准化系数定义为 β_w × sd_w(x) 的周度均值，即自变量变动一个截面标准差对应的周收益；第 9 节 HistGB 的特征用逐周秩变换后的 A+B 层变量，目标为逐周 1%/99% winsorize 后的 `ret_cc` | 协议未写明的实现细节，在看到结果前确定 | 否 |
+| 2026-10-11 | 新增协议外诊断 `diag_e2c_bridge.py`：从 E2C 的 chart + 1D 设定出发逐步加入控制变量，解释与 E2C/E3T 结论的差异 | 用于说明结论翻转的来源；只作探索性报告（`paper_results_E7.md` 第 9 节），不改变第 7 节的判定 | **是** |
 
 ## 12. 实施文件（E7 阶段创建）
 
@@ -235,6 +236,7 @@
 | `experiments/E7_incremental/run_resid_ic.py` | 第 6.2 节 |
 | `experiments/E7_incremental/run_double_sort.py` | 第 6.3 节 |
 | `experiments/E7_incremental/run_ctrl_gbm.py` | 第 9 节（满足触发条件时才运行） |
+| `experiments/E7_incremental/diag_e2c_bridge.py` | 协议外诊断：E2C 设定到 M2 的逐步分解 |
 
 ## 13. 局限
 

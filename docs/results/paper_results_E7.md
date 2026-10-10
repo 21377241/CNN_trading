@@ -209,7 +209,35 @@ H1 成立，满足触发条件。做法如下：
    - chart 的增量近年衰减（2020–2025 年 t = 2.07），在大市值股票中较弱；
    - 控制变量的非线性组合预测力最强，Rank IC 为 0.078。
 
-## 9. 产物
+## 9. 与 E2C、E3T–E5T 的关系（协议外诊断）
+
+> 本节是结果出来之后补做的探索性诊断，不属于冻结协议，不改变第 1 节的判定。脚本：`experiments/E7_incremental/diag_e2c_bridge.py`，输出 `diag_e2c_bridge.csv`。
+
+E2C 只控制 1D 得分时，chart 系数 t = 3.90；E3T 中 chart|1D 残差的 Rank IC 为 0.0153。之前据此认为两者含有不同信息。本节在 E7 主样本上从 E2C 的设定出发，逐步加入控制变量，看 chart 系数如何变化（秩变换，Fama–MacBeth，NW lag 4，系数为年化）。
+
+| 规格 | `ret_val`：chart 系数 / t | `ret_oo`：chart 系数 / t | `ret_oo`：1D 的 t |
+|---|---:|---:|---:|
+| 1. chart + 1D（E2C 设定） | 0.0845 / **3.87** | 0.0615 / 2.75 | 14.13 |
+| 2. + `rev_1w` | 0.0870 / 4.35 | 0.0602 / 2.91 | 13.33 |
+| 3. + A 层 | 0.0163 / 1.02 | 0.0113 / 0.70 | 14.83 |
+| 4. + A 层 + B 层 | 0.0190 / 1.47 | 0.0147 / 1.12 | 16.53 |
+| 5. + 行业去均值（即 M2） | 0.0149 / 1.36 | 0.0096 / 0.88 | 18.40 |
+
+在 chart + 1D 的基础上只加入一个 A 层变量（`ret_oo`，chart 的 t）：
+
+| 加入的变量 | `range_20d` | `vol_20d` | `max_20d` | `vtrend` | `rev_1w` | `ret_20d` | `ma_gap` | `clv_20d` |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| chart 的 t | 1.92 | 1.97 | 2.05 | 2.65 | 2.91 | 2.97 | 3.65 | 3.84 |
+
+解读：
+
+1. **E2C 的结果可以复现。** 第 1 行用原标签 `ret_val` 得到 t = 3.87，与 E2C 的 3.90 一致，差异不来自样本或方法。
+2. **结论翻转主要来自控制变量。** 加入 A 层后 chart 的系数消失。单个变量中，吸收最多的是振幅、波动率和最大日收益，反转变量几乎不起作用。chart-CNN 相对 1D-CNN 的特有部分，主要是价格波动幅度信息：K 线图的柱高和影线直接画出了高低价差。这与 E4T 的发现一致（chart|1D 残差依赖路径波动、影线和成交量）。
+3. **标签切换是次要原因。** 只把 `ret_val` 换成 `ret_oo`，t 就从 3.87 降到 2.75。E5T 发现 chart 的特有信号在次日最强、衰减很快，信号日收盘到次日开盘的那部分收益在 `ret_oo` 中被排除。但即使用 `ret_val` 并加入全部控制，t 也只有 1.36。
+4. **“不同”不等于“有增量”。** E3T–E5T 证明了两个模型的特有部分在机制和兑现时间上不同，这些描述仍然成立；但它们没有控制传统特征，不能说明 chart 的特有部分是新信息。论文中应改为：chart-CNN 偏重已知的波动幅度信息，1D-CNN 捕捉到传统特征之外的收益路径信息。
+5. **对 E10 的预期。** E3T 中 chart + 1D 组合的 Sharpe（3.46）高于 1D 单独（3.21），可能来自组合多带的波动率暴露；控制传统特征后，组合增益应接近 0。
+
+## 10. 产物
 
 `WORK_SPACE/paper/E7_incremental/` 下：
 - `sample_flow.csv`
@@ -219,6 +247,7 @@ H1 成立，满足触发条件。做法如下：
 - `resid_ric.csv`
 - `double_sort.csv`
 - `ctrl_gbm_grid.csv`
+- `diag_e2c_bridge.csv`：第 9 节的协议外诊断
 - `run_manifest_*.json`
 - 校验文件：`extended_panel_check.json`、`weekly_returns_check.json`、`weekly_controls_check.json`
 - `data/` 下的中间数据：周度收益、控制变量、合并样本、主规格周度系数、残差 IC 周度序列、`ctrl_gbm` 得分
@@ -233,4 +262,5 @@ python experiments/E7_incremental/run_fm.py
 python experiments/E7_incremental/run_resid_ic.py
 python experiments/E7_incremental/run_double_sort.py
 python experiments/E7_incremental/run_ctrl_gbm.py
+python experiments/E7_incremental/diag_e2c_bridge.py   # 协议外诊断
 ```
