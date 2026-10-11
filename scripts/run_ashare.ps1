@@ -1,18 +1,18 @@
-# =============================================================================
-# run_ashare.ps1  - A-Share Full Market + Paper-Aligned Pipeline  [PowerShell]
+﻿# =============================================================================
+# run_ashare.ps1  - A 股全市场干净版本数据流程（CSMAR，clean_spec 第 9 节）  [PowerShell]
+#
+# 只使用 CSMAR 原始数据（CSMAR_ROOT）；不读取任何旧数据。模型训练见 C3（3b/3c、train_1dcnn、run_depth）。
 #
 # Usage:
-#   .\scripts\run_ashare.ps1                              # full run
-#   .\scripts\run_ashare.ps1 -FromStep 2                  # resume from charts
-#   .\scripts\run_ashare.ps1 -OnlySteps 1                 # preprocess only
-#   .\scripts\run_ashare.ps1 -OnlySteps "2a,3a,4a"        # I20 path only
-#   .\scripts\run_ashare.ps1 -OnlySteps "2b,3b,4b"        # I5 path only
+#   .\scripts\run_ashare.ps1                         # 全流程
+#   .\scripts\run_ashare.ps1 -FromStep universe      # 从 universe 起
+#   .\scripts\run_ashare.ps1 -OnlySteps "audit,check"
 #   .\scripts\run_ashare.ps1 -DryRun
-#   .\scripts\run_ashare.ps1 -PreprocessArgs "--force-from 1"
+#   .\scripts\run_ashare.ps1 -PreprocessArgs "--force"
 # =============================================================================
 [CmdletBinding()]
 param(
-    [string] $FromStep       = "1",
+    [string] $FromStep       = "panel",
     [string] $OnlySteps      = "",
     [string] $PreprocessArgs = "",
     [switch] $DryRun
@@ -31,17 +31,20 @@ New-Item -ItemType Directory -Path $LogBase -Force | Out-Null
 
 $PreCmd1 = ("python ashare_train/1_preprocess_ashare_data.py " + $PreprocessArgs).Trim()
 $Steps = [ordered]@{
-    "1"  = @{ Name = "[Step1]  A-Share Preprocess (复权→feather)"; Cmd = $PreCmd1 }
-    "2a" = @{ Name = "[Step2a] Charts I20/month";  Cmd = "python ashare_train/2_generate_ashare_chart_data.py --spec I20R20" }
-    "2b" = @{ Name = "[Step2b] Charts I5/week";    Cmd = "python ashare_train/2_generate_ashare_chart_data.py --spec I5R5" }
-    "3a" = @{ Name = "[Step3a] Train I20/R20";     Cmd = "python ashare_train/3_train_ashare_model.py --spec I20R20" }
-    "3b" = @{ Name = "[Step3b] Train I5/R5";       Cmd = "python ashare_train/3_train_ashare_model.py --spec I5R5" }
-    "4a" = @{ Name = "[Step4a] Portfolio I20/R20"; Cmd = "python ashare_train/4_analyze_ashare_portfolio.py --spec I20R20" }
-    "4b" = @{ Name = "[Step4b] Portfolio I5/R5";   Cmd = "python ashare_train/4_analyze_ashare_portfolio.py --spec I5R5" }
+    "panel"    = @{ Name = "[panel]    CSMAR 日面板与股票信息";           Cmd = $PreCmd1 }
+    "fund"     = @{ Name = "[fund]     PIT 基本面（BM/EP/SP）";           Cmd = "python ashare_train/build_fundamentals.py" }
+    "market"   = @{ Name = "[market]   无风险利率、市场收益、指数";       Cmd = "python ashare_train/build_market.py" }
+    "audit"    = @{ Name = "[audit]    面板独立审计（从原始 zip 重算）";  Cmd = "python ashare_train/audit_csmar_panel.py" }
+    "universe" = @{ Name = "[universe] 周度样本键";                       Cmd = "python ashare_train/build_universe.py" }
+    "inputs"   = @{ Name = "[inputs]   I20R5 图像与 140 维特征";          Cmd = "python ashare_train/2_generate_ashare_chart_data.py" }
+    "check"    = @{ Name = "[check]    输入独立验收";                     Cmd = "python ashare_train/check_clean_inputs.py" }
+    "factors"  = @{ Name = "[factors]  自建 CH-3/CH-4 因子";              Cmd = "python ashare_train/build_ch_factors.py" }
+    "controls" = @{ Name = "[controls] E7 控制变量";                      Cmd = "python experiments/E7_incremental/build_controls.py" }
+    "returns"  = @{ Name = "[returns]  E7/E9 收益";                       Cmd = "python experiments/E7_incremental/build_returns.py" }
 }
 
 # Ordered step keys for FromStep comparison
-$Order = @("1","2a","2b","3a","3b","4a","4b")
+$Order = @("panel","fund","market","audit","universe","inputs","check","factors","controls","returns")
 
 function Write-Log {
     param([string]$Msg, [string]$Color = "White")
@@ -53,7 +56,7 @@ function Should-Run {
     param([string]$Step)
     $idx = [array]::IndexOf($Order, $Step)
     $fromIdx = [array]::IndexOf($Order, $FromStep)
-    if ($fromIdx -lt 0) { $fromIdx = 0 }
+    if ($fromIdx -lt 0) { throw "unknown FromStep: $FromStep" }
     if ($idx -lt $fromIdx) { return $false }
     if ($OnlySteps -ne "") {
         $arr = $OnlySteps -split ','
@@ -121,7 +124,7 @@ Set-Location $ProjectRoot
 
 Write-Log ""
 Write-Log ("=" * 56) "White"
-Write-Log "   CNN Trading - A-Share Full Market Pipeline" "White"
+Write-Log "   CNN Trading - A-Share Clean Data Pipeline (CSMAR)" "White"
 Write-Log ("=" * 56) "White"
 Write-Log "  Project  : $ProjectRoot"
 Write-Log "  Log      : $LogFile"
@@ -149,8 +152,8 @@ Write-Log "  A-Share Pipeline Complete!  Total: ${min}m${sec}s" "Green"
 Write-Log ("=" * 56) "Green"
 Write-Log "  Log: $LogFile"
 Write-Log "  Outputs:"
-Write-Log "    Feather   : WORK_SPACE\data\ashare_processed_data\ashare_ret.feather"
-Write-Log "    Charts    : WORK_SPACE\data\ashare_stocks_dataset\{I20R20|I5R5}\"
-Write-Log "    Models    : WORK_SPACE\ashare_model_res_{I20R20|I5R5}\"
-Write-Log "    Portfolio : ...\portfolio\  and  ...\topN_portfolio\"
-Write-Log "    Report    : docs\论文主实验复现报告_A股全市场.md"
+Write-Log "    Panel     : WORK_SPACE\data\ashare_processed_data\ashare_ret.feather"
+Write-Log "    Universe  : WORK_SPACE\data\ashare_processed_data\universe_weekly.feather"
+Write-Log "    Images    : WORK_SPACE\data\ashare_stocks_dataset\I20R5_clean\"
+Write-Log "    Features  : WORK_SPACE\paper\clean_inputs\features140\"
+Write-Log "    E7 data   : WORK_SPACE\paper\E7_incremental\"

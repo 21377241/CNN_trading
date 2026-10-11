@@ -387,7 +387,7 @@ E1 原先按行位置比对；截断点之后才发生的代码变更会让截�
     - 收盘恰在限价与 CSMAR `LimitStatus` 一致率 99.9996%；
     - 7 行的 `ret_cc` 为缺失，原因是 2026 年 9 月停牌、直到样本截止日未复牌（右删失）；
     - 主样本外期：次日开盘无法买入 0.34%、买入日一字涨停 0.12%、卖出因一字跌停顺延 0.14%、退出价为过期价 0.18%。
-- E3、E5 和 `5_analyze_ashare_topk_robust.py` 仍在用旧的区间规则（`limit_pct_series`），在 C5 重跑这些次级实验时改用 `limit_state`。
+- E3、E5 和 `5_analyze_ashare_topk_robust.py` 仍在用旧的区间规则（`limit_pct_series`），在 C5 重跑这些次级实验时改用 `limit_state`。（已提前处理，见下文“clean 分支与旧数据隔离”。）
 
 **6. 自建 CH-3 / CH-4 因子（`build_ch_factors.py`）**
 
@@ -401,3 +401,74 @@ E1 原先按行位置比对；截断点之后才发生的代码变更会让截�
   - 官方用扣除非经常性损益的净利润，CSMAR 未购买；
   - 官方用实际披露日，本文用法定截止日。
 - 使用：主分析用自建因子（2000-01 至 2026-09）；2021 年以前用官方因子做稳健性检验。
+
+### 2026-10-11 clean 分支与旧数据隔离（尚无任何模型结果）
+
+目的：clean 分支的构建、训练和分析只读 CSMAR 数据。与旧数据的比较只保留两类，都只报告、不进入任何结果：新旧数据对账，以及渲染器缺陷评估（第 6 节的 M0、M1）。
+
+**1. 旧数据的位置**
+
+- 旧工作区（M0 预测、旧图像、旧面板）：`config.PRE_CLEAN_WORK_DIR`，只读。
+- 本工作区内的旧数据产物统一移到 `WORK_SPACE/_olddata`（`config.OLD_DATA_WORK_DIR`）：
+  - 旧数据上的干净版本（tag `clean-olddata-v1`）；
+  - 由旧原始文件重建的后复权数据（`raw_reconstructed`）；
+  - M1 的图像（`I20R5_rendfix`）、模型与日志（`E1c_cnn_M1_rendfix`）。
+- `config_cnn_m1_rendfix.yaml` 用新增的 `stocks_root` 指向 `_olddata`，`3c_cnn_full_train.py` 支持该字段。
+- 删除 `config.py` 中旧原始数据（`ASHARE_RAW_*`）和旧实验目录（`ASHARE_EXP_DIR_*`、`PAPER_*`）的配置。
+
+**2. 只允许以下文件引用旧数据**
+
+| 文件 | 用途 |
+|---|---|
+| `ashare_train/reconcile_pre_clean.py` | 新旧对账：面板（原审计 D1、D2、F2）、样本键、窗口收盘价路径与渲染对比图；输出 `docs/protocol/pre_clean_reconciliation.md` |
+| `ashare_train/2m1_rerender_legacy_windows.py`、`config_cnn_m1_rendfix.yaml` | 生成 M1 |
+| `experiments/E1_image_baseline/eval_clean_cnn_impact.py` | M0、M1、M2 比较 |
+
+`audit_csmar_panel.py`、`build_universe.py`、`check_clean_inputs.py` 不再读取任何旧数据（相应的对账移入 `reconcile_pre_clean.py`）。
+
+**3. 旧规则**
+
+- 删除 `E7_incremental/common.py` 中的涨跌停区间规则（`limit_pct`、`hit_limit_band`）和 E3 的 `limit_pct_series`。
+- 新增 `common.limit_flags_at`：在全面板上计算 `limit_state`，按样本键取出。`build_controls.py`、E3 `build_geometry.py`、E5 `run_e57_institutional.py` 都改用它。无涨跌停限制的日子（如新股上市初期），E3、E5 的涨跌停标记为缺失，不再按区间猜测。
+- E7 的规范预测改由 registry v2（`WORK_SPACE/paper/registry_v2.json`）读取并核对 sha1；registry v2 在 C3 冻结模型后生成，此前 E7 分析脚本会报错退出。
+
+**4. 删除只适用于旧数据流程的脚本**
+
+依据第 8 节“不保留、不重跑”：
+
+- 旧训练和分析入口：`3_train_ashare_model.py`、`4_analyze_ashare_portfolio.py`、`5_analyze_ashare_topk_robust.py`、`paper_e1_*.py`、`E0_audit/audit_timing.py`；
+- M0 的配置：`config_cnn_hp.yaml`、`config_cnn_hp_ric.yaml`。第 5.1 节所说的“原网格”已原样写在 `config_cnn_hp_clean.yaml` 中；
+- `run_e2_cnn_bridge.py`；
+- E2、E2A、E2B 的旧变体配置与脚本；
+- E2D。
+
+这些文件在 git 历史和 tag `clean-olddata-v1` 中可查。
+
+**5. 入口修正**
+
+- `config_cnn_hp_clean.yaml` 的 `oos_years` 补上 2026。原配置止于 2025；而 `3b` 会静默跳过缺少数据的年份，所以不会报错。
+- `3b_cnn_hp_search.py` 的修改：
+  - 配置中任何年份缺少图像或标签时报错退出；
+  - `training` 改为必填；
+  - 默认配置改为 `config_cnn_hp_clean.yaml`；
+  - 删除第三阶段调用旧组合分析脚本和与旧基准 Sharpe（2.65）比较的部分；
+  - 日志写入 `out_root`。
+- `E2F_mlp_depth/run_depth.py` 的默认输入改为 `clean_inputs/features140`。
+- `E2_matched_tabular/run_train.py`、`run_eval.py` 的 `--config` 改为必填。
+- `eval_clean_cnn_impact.py`：M2 读取 2008–2026 的预测（M0、M1 止于 2025）；干净样本剔除北交所，与主样本一致。
+- `scripts/run_ashare.ps1` 改为干净版本的数据流程：面板 → 基本面 → 市场 → 审计 → universe → 图像与特征 → 验收 → CH 因子 → E7 控制变量 → E7 收益。
+
+**5a. 仍待 C5 迁移的次级实验**
+
+E2G、E3/E4/E5（含 T 版本）、E6A、E0 registry/主表脚本的默认输入，仍是旧流程的结果目录名（如 `E2_matched_is_ind`、`E2C_temporal_1dcnn_120`）。这些目录在 clean 工作区不存在，运行时会因缺少文件报错，不会读到旧数据。这些实验在 C5 重跑时改为读取 registry v2 和 `clean_inputs`。
+
+**6. 守卫检查（`tests/test_clean_independence.py`）**
+
+- 代码：
+  - 只有第 2 项所列文件可以引用旧数据目录；
+  - 任何 A 股代码中都不出现旧原始数据路径、旧涨跌停区间规则、旧面板独有的列（PE_TTM、PB、pct_chg、is_limit_up、sec_name）；
+  - `training: legacy` 只用于 M1。
+- `WORK_SPACE`：
+  - 不存在旧实验目录；
+  - 图像数据集目录都以 `_clean` 结尾；
+  - 日面板含 CSMAR 特有的列，且不含旧数据商的列。

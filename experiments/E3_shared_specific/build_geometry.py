@@ -15,7 +15,7 @@ if PROJECT_ROOT not in sys.path:
 
 from experiments.E2_matched_tabular.e2a_layout import FEAT_180
 from experiments.E3_shared_specific.paths import OUT_ROOT, PER_DAY, WINDOW
-from experiments.E3_shared_specific.utils import limit_pct_series
+from experiments.E7_incremental.common import limit_flags_at
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger('e3_geom')
@@ -62,10 +62,9 @@ def build_geometry(out_path: str | None = None, chunk: int = 400_000) -> pd.Data
 
     g = pd.concat(parts, ignore_index=True)
     g['ending_date'] = pd.to_datetime(g['ending_date'])
-    lim = limit_pct_series(g['StockID'], g['ending_date'])
-    ret = g['Ret'].values.astype(float) if 'Ret' in g.columns else np.full(len(g), np.nan)
-    g['hit_limit'] = (np.abs(ret) >= (lim - 1e-4)).astype(float)
-    g.loc[~np.isfinite(ret), 'hit_limit'] = np.nan
+    lim = limit_flags_at(g)
+    g['hit_limit'] = (lim['close_up'].astype(bool) | lim['close_dn'].astype(bool)).astype(float)
+    g.loc[(lim['no_limit'].isna() | lim['no_limit'].astype(bool)).to_numpy(), 'hit_limit'] = np.nan
     out_path = out_path or os.path.join(OUT_ROOT, 'geometry.parquet')
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     g.to_parquet(out_path, index=False)

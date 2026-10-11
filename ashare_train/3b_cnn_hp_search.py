@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-import subprocess
 import sys
 
 # Windows: avoid OpenMP dual-init crash (MKL + PyTorch)
@@ -29,14 +28,14 @@ if CODE_PKG not in sys.path:
     sys.path.insert(0, CODE_PKG)
 
 from Misc.config import (
-    ASHARE_STOCKS_SAVEPATH, ASHARE_COUNTRY, MA_LAGS, VOLUME_BAR, ASHARE_LOG_DIR,
+    ASHARE_STOCKS_SAVEPATH, ASHARE_COUNTRY, MA_LAGS, VOLUME_BAR,
 )
 from Data.dgp_config import get_dataset_dir, get_dataset_filename
 from Experiments.cnn_experiment import run_cnn_trial, train_us_model, _build_exp_dir
 from Model.cnn_model import get_full_model_name
 
 DEFAULT_CONFIG = os.path.join(
-    PROJECT_ROOT, 'experiments', 'E1_image_baseline', 'config_cnn_hp.yaml'
+    PROJECT_ROOT, 'experiments', 'E1_image_baseline', 'config_cnn_hp_clean.yaml'
 )
 
 
@@ -104,7 +103,7 @@ def _run_trial(cfg, lr, dropout, patience, train_patience, n_ensembles,
         dir_suffix=_trial_suffix(patience, stage='hp', metric_tag=tag),
         force_retrain=force,
         search_metric=metric,
-        training=cfg.get('training', 'legacy'),
+        training=cfg['training'],
     )
     return _trial_row(trial_id, phase, lr, dropout, patience, result, stage)
 
@@ -289,7 +288,7 @@ def run_phase3(cfg, dataset_dir, out_root, force: bool) -> pd.DataFrame:
             dir_suffix=suffix,
             skip_oos=False,
             force_retrain=force,
-            training=cfg.get('training', 'legacy'),
+            training=cfg['training'],
         )
         exp_leaf = _build_exp_dir(
             model_name, ws, pw, lr, dp, freq,
@@ -297,17 +296,6 @@ def run_phase3(cfg, dataset_dir, out_root, force: bool) -> pd.DataFrame:
             base_exp_dir=out_root,
             dir_suffix=suffix,
         )
-        if cfg.get('run_portfolio_analysis', True):
-            subprocess.run(
-                [
-                    sys.executable,
-                    os.path.join(PROJECT_ROOT, 'ashare_train', '4_analyze_ashare_portfolio.py'),
-                    '--spec', cfg.get('spec', 'I20R5'),
-                    '--exp-dir', exp_leaf,
-                    '--n-ensembles', str(p3cfg['n_ensembles']),
-                ],
-                check=False,
-            )
         rows.append({
             'lr': lr, 'dropout': dp, 'patience': pat,
             'dir_suffix': suffix,
@@ -322,39 +310,7 @@ def run_phase3(cfg, dataset_dir, out_root, force: bool) -> pd.DataFrame:
     path = os.path.join(out_root, 'phase3_full_train.csv')
     df.to_csv(path, index=False)
     logging.info(f'wrote {path}')
-    _summarize_phase3_sharpe(out_root, cfg, df)
     return df
-
-
-def _summarize_phase3_sharpe(out_root: str, cfg: dict, phase3_df: pd.DataFrame):
-    summaries = []
-    for _, row in phase3_df.iterrows():
-        summary_path = os.path.join(row.get('exp_dir', ''), 'portfolio', 'portfolio_summary.txt')
-        sharpe = None
-        if summary_path and os.path.isfile(summary_path):
-            with open(summary_path, 'r', encoding='utf-8', errors='replace') as f:
-                section = None
-                for line in f:
-                    if '等权' in line or 'Equal-Weight' in line:
-                        section = 'ew'
-                    if section == 'ew' and line.strip().startswith('H-L'):
-                        parts = line.split()
-                        if len(parts) >= 5:
-                            sharpe = float(parts[4])
-                            break
-        summaries.append({
-            'lr': row['lr'], 'dropout': row['dropout'], 'patience': row['patience'],
-            'label': row['label'], 'ew_hl_sharpe': sharpe,
-            'summary_path': summary_path or '',
-        })
-    out = pd.DataFrame(summaries)
-    out_path = os.path.join(out_root, 'phase3_portfolio_summary.csv')
-    out.to_csv(out_path, index=False)
-    logging.info(f'wrote {out_path}')
-    baseline = float(cfg.get('baseline_ew_hl_sharpe', 2.65))
-    best = pd.to_numeric(out['ew_hl_sharpe'], errors='coerce').max()
-    if pd.notna(best):
-        logging.info(f'Phase3 best EW H-L Sharpe={best:.4f} vs baseline={baseline:.4f}')
 
 
 def main():
@@ -375,8 +331,6 @@ def main():
             shutil.copy2(args.config, cfg_dst)
     except OSError:
         pass
-    os.makedirs(ASHARE_LOG_DIR, exist_ok=True)
-
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s [%(levelname)s] %(message)s',
@@ -384,7 +338,7 @@ def main():
         handlers=[
             logging.StreamHandler(),
             logging.FileHandler(
-                os.path.join(ASHARE_LOG_DIR, 'cnn_hp_search.log'),
+                os.path.join(out_root, 'cnn_hp_search.log'),
                 encoding='utf-8',
             ),
         ],
@@ -404,12 +358,11 @@ def main():
                 out.append(y)
         return out
 
-    cfg['train_years'] = available(cfg['train_years'])
-    cfg['val_years'] = available(cfg['val_years'])
-    cfg['oos_years'] = available(cfg['oos_years'])
-    if not cfg['train_years'] or not cfg['val_years']:
-        logging.error('train/val 年份数据不足')
-        return 1
+    for k in ('train_years', 'val_years', 'oos_years'):
+        missing = sorted(set(cfg[k]) - set(available(cfg[k])))
+        if missing:
+            logging.error(f'{k} 缺少图像或标签文件：{missing}（{dataset_dir}）')
+            return 1
 
     logging.info(f'out_root={out_root}  dataset={dataset_dir}')
     logging.info(

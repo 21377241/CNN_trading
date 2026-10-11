@@ -38,13 +38,6 @@ STOCKS_SAVEPATH = os.path.join(WORK_DIR, 'data', 'stocks_dataset')
 # 图表数据集目录（CSI800）
 CSI800_STOCKS_SAVEPATH = os.path.join(WORK_DIR, 'data', 'csi800_stocks_dataset')
 
-# A 股全市场原始数据（每股一文件，默认百度网盘「股票4.14」）
-ASHARE_RAW_ROOT = os.environ.get(
-    'ASHARE_RAW_ROOT',
-    r'F:\BaiduNetdiskDownload\股票4.14'
-)
-ASHARE_RAW_ADJ_DIR = os.path.join(ASHARE_RAW_ROOT, '每只股票一个文件', '后复权')
-ASHARE_RAW_UNADJ_DIR = os.path.join(ASHARE_RAW_ROOT, '每只股票一个文件', '不复权')
 ASHARE_PROCESSED_DATA_DIR = os.path.join(WORK_DIR, 'data', 'ashare_processed_data')
 ASHARE_STOCKS_SAVEPATH = os.path.join(WORK_DIR, 'data', 'ashare_stocks_dataset')
 
@@ -60,8 +53,12 @@ ASHARE_STOCK_INFO_PATH = os.path.join(ASHARE_PROCESSED_DATA_DIR, 'ashare_stock_i
 ASHARE_UNIVERSE_PATH = os.path.join(ASHARE_PROCESSED_DATA_DIR, 'universe_weekly.feather')
 CLEAN_INPUTS_DIR = os.path.join(WORK_DIR, 'paper', 'clean_inputs')
 
-# 旧工作区（pre-clean-v1），只读：M0 预测、旧图像与旧面板，用于对账和图像缺陷评估
+# 旧数据（只读，不进入 clean 分支的任何构建、模型或结果）：只由 reconcile_pre_clean.py（新旧对账）和
+# 渲染器缺陷评估（2m1_rerender_legacy_windows.py、eval_clean_cnn_impact.py 的 M0/M1）读取。
+#   PRE_CLEAN_WORK_DIR：旧工作区（pre-clean-v1）：M0 预测、旧图像与旧面板
+#   OLD_DATA_WORK_DIR：旧数据上的干净版本产物（tag clean-olddata-v1）与 M1
 PRE_CLEAN_WORK_DIR = os.environ.get('CNN_TRADING_PRE_CLEAN_WORK_DIR', r'F:\LLM_trading\CNN_trading\WORK_SPACE')
+OLD_DATA_WORK_DIR = os.path.join(WORK_DIR, '_olddata')
 
 # 缓存目录（SPY 期末等）
 CACHE_DIR = os.path.join(_TREND_SUBMIT, 'CACHE_DIR')
@@ -94,29 +91,10 @@ CSI800_IS_YEARS = list(range(2007, 2019))   # 样本内训练年份（2007-2018�
 CSI800_OOS_YEARS = list(range(2019, 2026))  # 样本外测试年份（2019-2025）
 
 # ========================
-# 年份配置（A股全市场：类比论文前8年训练）
+# A 股全市场：切分（训练 2000–2005、验证 2006–2007、OOS 2008-01 至 SAMPLE_END）见
+# experiments/common/splits.py 与 ashare_train/build_universe.py
 # ========================
-ASHARE_IS_YEARS = list(range(2000, 2008))    # 2000-2007
-ASHARE_OOS_YEARS = list(range(2008, 2027))   # 2008-01 至 SAMPLE_END（2026-09-30）
 ASHARE_COUNTRY = 'CHN'
-ASHARE_EXP_DIR_I20 = os.path.join(WORK_DIR, 'ashare_model_res_I20R20')
-ASHARE_EXP_DIR_I5 = os.path.join(WORK_DIR, 'ashare_model_res_I5R5')
-ASHARE_EXP_DIR_I20R5 = os.path.join(WORK_DIR, 'ashare_model_res_I20R5')
-ASHARE_LOG_DIR = os.path.join(WORK_DIR, 'ashare_model_res', 'log')
-
-# ========================
-# 论文主文：chronological 切分（方案 V1）
-# Jiang 式 IS/OOS 保留作附录对照，不覆盖上面变量
-# ========================
-PAPER_TRAIN_YEARS = list(range(2005, 2015))   # 2005–2014
-PAPER_VAL_YEARS = list(range(2015, 2018))     # 2015–2017
-PAPER_TEST_YEARS = list(range(2018, 2026))    # 2018–2025
-PAPER_IPO_EXCLUDE_DAYS = 60                  # 上市初期剔除交易日数（待字段齐备后启用）
-PAPER_EXP_DIR_E1 = os.path.join(WORK_DIR, 'ashare_paper_E1_I20R5')
-PAPER_EXP_DIR_E2 = os.path.join(WORK_DIR, 'ashare_paper_E2_matched')
-PAPER_EXP_DIR_E3 = os.path.join(WORK_DIR, 'ashare_paper_E3_traditional')
-PAPER_LOG_DIR = os.path.join(WORK_DIR, 'ashare_paper', 'log')
-PAPER_DOCS_DIR = os.path.join(os.path.dirname(WORK_DIR), 'docs')
 
 # ========================
 # 模型与训练超参数（对齐 Jiang et al. JF 2023）
@@ -148,7 +126,6 @@ CSI800_COUNTRY = 'CHN'
 # CSV 文件编码
 SPX_CSV_ENCODING = 'gbk'
 CSI800_CSV_ENCODING = 'gbk'
-ASHARE_CSV_ENCODING = 'utf-8-sig'
 
 # CSI800 旧流程的日收益裁剪；A 股全市场干净版本不裁剪（clean_spec D1）
 CSI800_RET_CLIP = 0.11
@@ -158,8 +135,6 @@ for _d in [WORK_DIR, PROCESSED_DATA_DIR, CSI800_PROCESSED_DATA_DIR,
            ASHARE_PROCESSED_DATA_DIR, ASHARE_STOCKS_SAVEPATH,
            STOCKS_SAVEPATH, CSI800_STOCKS_SAVEPATH, CACHE_DIR,
            EXP_DIR, LOG_DIR, LATEX_DIR, PORTFOLIO_DIR,
-           CSI800_EXP_DIR, CSI800_LOG_DIR, CSI800_PORTFOLIO_DIR,
-           ASHARE_EXP_DIR_I20, ASHARE_EXP_DIR_I5, ASHARE_EXP_DIR_I20R5, ASHARE_LOG_DIR,
-           PAPER_EXP_DIR_E1, PAPER_EXP_DIR_E2, PAPER_EXP_DIR_E3, PAPER_LOG_DIR]:
+           CSI800_EXP_DIR, CSI800_LOG_DIR, CSI800_PORTFOLIO_DIR]:
     os.makedirs(_d, exist_ok=True)
 

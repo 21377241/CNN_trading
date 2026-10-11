@@ -34,25 +34,27 @@ for p in (CODE_PKG, PROJECT_ROOT):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from Misc.config import (ASHARE_STOCKS_SAVEPATH, ASHARE_COUNTRY, ASHARE_UNIVERSE_PATH, PRE_CLEAN_WORK_DIR,
-                         MA_LAGS, VOLUME_BAR)
+from Misc.config import (ASHARE_STOCKS_SAVEPATH, ASHARE_COUNTRY, ASHARE_UNIVERSE_PATH, OLD_DATA_WORK_DIR,
+                         PRE_CLEAN_WORK_DIR, MA_LAGS, VOLUME_BAR)
 from Data.dgp_config import get_dataset_dir
 from Experiments.cnn_experiment import _dataset, _loader, _predict, _mean_rank_ic, _get_device
 from Model.cnn_model import init_model, get_full_model_name
 from experiments.common.metrics import newey_west_t, annualized_sharpe
 
-OOS_YEARS = list(range(2008, 2026))
+OOS_YEARS_OLD = list(range(2008, 2026))    # M0、M1：旧数据止于 2025
+OOS_YEARS_CLEAN = list(range(2008, 2027))  # M2：CSMAR 数据，止于 SAMPLE_END
 VAL_YEARS = [2006, 2007]
 LEAF = 'D20L3F53S31D21MP21F53S11D11MP21F53S11D11MP21C256'
 M0_DIR = os.path.join(PRE_CLEAN_WORK_DIR, 'paper', 'E1b_cnn_hp_I20R5_ric', LEAF,
                       '20d5p-lr1E-4-dp0.50-maTrue-vbTrue-weekTrained-noDelayedReturn-ric-full-p5')
-M1_DIR = os.path.join(PROJECT_ROOT, 'WORK_SPACE', 'paper', 'E1c_cnn_M1_rendfix', LEAF,
+M1_DIR = os.path.join(OLD_DATA_WORK_DIR, 'paper', 'E1c_cnn_M1_rendfix', LEAF,
                       '20d5p-lr1E-4-dp0.50-maTrue-vbTrue-weekTrained-noDelayedReturn-ric-full-p5')
 M2_ROOT = os.path.join(PROJECT_ROOT, 'WORK_SPACE', 'paper', 'E1c_cnn_hp_I20R5_clean')
 OUT_DIR = os.path.join(PROJECT_ROOT, 'WORK_SPACE', 'paper', 'E1c_clean_cnn_impact')
 DATASETS = {
     'M0': (get_dataset_dir(ASHARE_COUNTRY, base_savepath=os.path.join(PRE_CLEAN_WORK_DIR, 'data', 'ashare_stocks_dataset', 'I20R5')), 'legacy'),
-    'M1': (get_dataset_dir(ASHARE_COUNTRY, base_savepath=os.path.join(ASHARE_STOCKS_SAVEPATH, 'I20R5_rendfix')), 'legacy'),
+    'M1': (get_dataset_dir(ASHARE_COUNTRY, base_savepath=os.path.join(OLD_DATA_WORK_DIR, 'data', 'ashare_stocks_dataset',
+                                                                      'I20R5_rendfix')), 'legacy'),
     'M2': (get_dataset_dir(ASHARE_COUNTRY, base_savepath=os.path.join(ASHARE_STOCKS_SAVEPATH, 'I20R5_clean')), 'train'),
 }
 
@@ -66,8 +68,8 @@ def m2_dir() -> tuple[str, dict]:
     return row['exp_dir'], {'lr': float(row['lr']), 'dropout': float(row['dropout']), 'patience': int(row['patience'])}
 
 
-def load_preds(exp_dir: str, n: int = 5) -> pd.DataFrame:
-    files = [os.path.join(exp_dir, 'ensem_res', f'ensem{n}_res_{y}.csv') for y in OOS_YEARS]
+def load_preds(exp_dir: str, years: list[int], n: int = 5) -> pd.DataFrame:
+    files = [os.path.join(exp_dir, 'ensem_res', f'ensem{n}_res_{y}.csv') for y in years]
     missing = [f for f in files if not os.path.exists(f)]
     if missing:
         raise FileNotFoundError(f'缺少 {len(missing)} 个预测文件，例如 {missing[0]}')
@@ -177,14 +179,15 @@ def main():
 
     m2, m2_hp = m2_dir()
     dirs = {'M0': M0_DIR, 'M1': M1_DIR, 'M2': m2}
-    preds = {k: load_preds(v) for k, v in dirs.items()}
+    preds = {k: load_preds(v, OOS_YEARS_CLEAN if k == 'M2' else OOS_YEARS_OLD) for k, v in dirs.items()}
     key = ['StockID', 'ending_date']
 
     u = pd.read_feather(ASHARE_UNIVERSE_PATH, columns=['StockID', 'ending_date', 'split', 'ret_label', 'label',
-                                                     'board', 'MarketCap'])
+                                                     'board', 'is_bj', 'MarketCap'])
     u['StockID'] = u['StockID'].astype(str)
     u['ending_date'] = pd.to_datetime(u['ending_date'])
-    u = u[(u['split'] == 'oos') & u['ret_label'].notna()].rename(columns={'MarketCap': 'mcap_clean'})
+    u = u[(u['split'] == 'oos') & u['ret_label'].notna() & ~u['is_bj']]
+    u = u.drop(columns='is_bj').rename(columns={'MarketCap': 'mcap_clean'})
 
     # A：旧样本、旧标签
     a = preds['M0'][key + ['ret_val', 'MarketCap', 'up_prob']].rename(columns={'up_prob': 'M0'})

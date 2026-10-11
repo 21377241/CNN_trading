@@ -1,43 +1,9 @@
 # E2 — Matched-Information Benchmark
 
-对照设计见 [`docs/design/paper_e2_design.md`](../../docs/design/paper_e2_design.md)。
+对照设计见 [`docs/design/paper_e2_design.md`](../../docs/design/paper_e2_design.md)。旧数据上的结果见 [`docs/results/paper_results_E2.md`](../../docs/results/paper_results_E2.md)（历史记录）。
 
-## 设定摘要
+clean 分支只保留附录模型（HistGB、Logit、MLP-180）所需的训练和评估代码（`clean_spec.md` 第 8 节）。E2、E2A、E2B 的旧变体不保留，已删除，可在 git 历史中查到。
 
-- 同一 20 日窗；特征 = 归一化 OHLC + Vol + **仅 MA20**（无 MA5）
-- 模型：SGD Logit（原文规格 + IS-val 网格） | **HistGB**（主） | MLP；CNN = 已有 I20R5 `up_prob`
-- **主协议切分**：IS 2000–2007（70/30, seed=42）；OOS 2008–2025
-- 产物：`WORK_SPACE/paper/E2_matched_is/`（120 维）与 `E2_matched_is_ind/`（180 维）
-- 统一结果：[`docs/results/paper_results_E2.md`](../../docs/results/paper_results_E2.md)
-
-### 额外稳健性：时序 Val（不覆盖主产物）
-
-- Train 2000–2005 / Val 2006–2007 / OOS 2008–2025；复用既有特征缓存
-- 配置：`config_chrono.yaml`、`config_ind_chrono.yaml`
-- 产物：`WORK_SPACE/paper/E2_matched_is_chrono/`、`E2_matched_is_ind_chrono/`（见结果文档 §4）
-
-### 公平 chrono + Rank IC（180 维；§5）
-
-- 与上相同 chrono Val；tabular `search_metric: val_rank_ic`；CNN = E1b-ric 最优（不重训）
-- 配置：`config_ind_chrono_ric.yaml`
-- 产物：`WORK_SPACE/paper/E2_matched_is_ind_chrono_ric/`（见结果文档 §5）
-
-## 命令
-
-```powershell
-python experiments/E2_matched_tabular/build_dataset.py
-python experiments/E2_matched_tabular/run_train.py
-# 仅重训 Logit（不覆盖 HistGB / MLP）：
-python experiments/E2_matched_tabular/run_train.py --only logit
-python experiments/E2_matched_tabular/run_eval.py
-
-# 时序 Val 稳健性（独立 out_root）
-python experiments/E2_matched_tabular/run_train.py --config experiments/E2_matched_tabular/config_chrono.yaml
-python experiments/E2_matched_tabular/run_eval.py --config experiments/E2_matched_tabular/config_chrono.yaml
-python experiments/E2_matched_tabular/run_train.py --config experiments/E2_matched_tabular/config_ind_chrono.yaml
-python experiments/E2_matched_tabular/run_eval.py --config experiments/E2_matched_tabular/config_ind_chrono.yaml
-
-# 公平 chrono + Rank IC（180 维；CNN = E1b-ric，见 §5）
-python experiments/E2_matched_tabular/run_train.py --config experiments/E2_matched_tabular/config_ind_chrono_ric.yaml
-python experiments/E2_matched_tabular/run_eval.py --config experiments/E2_matched_tabular/config_ind_chrono_ric.yaml
-```
+- `build_dataset.py`：由 universe 和 CSMAR 日面板单独重建 140 维特征（默认写到 `WORK_SPACE/paper/clean_inputs/features140`，与 `2_generate_ashare_chart_data.py` 的产物相同）。
+- `run_train.py`、`run_eval.py`：`--config` 必填。
+- `config_ind_chrono_ric.yaml`、`config_ind_chrono_ric_mlp4.yaml`：旧数据上的规范设定（标签、CNN 预测指向旧流程的目录，在 clean 工作区不存在）。C5 重跑附录模型时，另建读取 `clean_inputs` 和 registry v2 的配置。

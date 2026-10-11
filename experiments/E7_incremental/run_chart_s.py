@@ -15,7 +15,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from experiments.E7_incremental.common import (  # noqa: E402
-    CHART_S_SHA1, KEYS, OUT, OUT_DATA, load_chart_s, write_manifest,
+    CHART_S, KEYS, registry_entry, OUT, OUT_DATA, load_chart_s, write_manifest,
 )
 from experiments.E7_incremental.diag_e2c_bridge import bridge, show  # noqa: E402
 from experiments.E7_incremental.run_double_sort import double_sort  # noqa: E402
@@ -65,7 +65,7 @@ def main() -> int:
     br = bridge(main_df, ['s_chartS', 's_1d'])
     br.to_csv(OUT_S / 'diag_bridge.csv', index=False)
 
-    write_manifest('run_chart_s', {'chart_s_sha1': CHART_S_SHA1, 'coverage_main': coverage,
+    write_manifest('run_chart_s', {'chart_s_sha1': registry_entry(CHART_S)[1], 'coverage_main': coverage,
                                    'rows_main_used': len(main_df), 'seconds': round(time.time() - t0)})
 
     pd.set_option('display.width', 220)

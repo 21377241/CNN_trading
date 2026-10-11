@@ -1,33 +1,19 @@
 # E1 — Image baseline (I20/R5)
 
-## E1 主结果（已完成）
+clean 分支只使用 CSMAR 数据（`docs/protocol/clean_spec.md` 第 9 节）。旧数据上的 E1/E1b 结果见 `docs/results/paper_results_E1b.md`（历史记录），其配置在 git 历史和 tag `clean-olddata-v1` 中。
 
-| 项 | 值 |
-|----|-----|
-| 设定 | window_size=20，freq=week，标签 Ret_week |
-| 切分 | IS 2000–2007（70/30 随机 val）；OOS 2008–2025 |
-| 模型 | CNN `D20…C256`，5 ensembles |
-| 预测 | `WORK_SPACE/ashare_model_res_I20R5/**/ensem_res/ensem5_res_YYYY.csv` |
-| 回测 | EW H-L Sharpe ≈ **2.65** |
-| 报告 | `docs/repro/ashare_paper_repro_report.md` |
+## M2：干净版本 chart-CNN（clean_spec 5.1）
 
-E2 只**读取**上述 OOS `up_prob`，不修改该目录。
-
-## E1b：A 股 CNN 超参本地化（chrono val）
-
-- 设计：[`docs/design/paper_cnn_hp_design.md`](../../docs/design/paper_cnn_hp_design.md)
-- 结果：[`docs/results/paper_results_E1b.md`](../../docs/results/paper_results_E1b.md)
-- 配置：[`config_cnn_hp.yaml`](config_cnn_hp.yaml)
-- 产物：`WORK_SPACE/paper/E1b_cnn_hp_I20R5/`（不覆盖 `ashare_model_res_I20R5/`）
-
-## E1b-ric：用截面 Rank IC 重选（修正 MCC 选参）
-
-昨天实验用 **val_mcc** 选参，与组合目标不对齐。重跑：
-
-- 配置：[`config_cnn_hp_ric.yaml`](config_cnn_hp_ric.yaml)
-- 产物：`WORK_SPACE/paper/E1b_cnn_hp_I20R5_ric/`（不覆盖 MCC 版）
-- 选参：`search_metric: val_rank_ic`；早停仍用 val_loss
+- 配置：[`config_cnn_hp_clean.yaml`](config_cnn_hp_clean.yaml)（原 E1b-ric 网格与三阶段流程；`training: clean`；OOS 2008–2026）
+- 输入：`WORK_SPACE/data/ashare_stocks_dataset/I20R5_clean/`
+- 产物：`WORK_SPACE/paper/E1c_cnn_hp_I20R5_clean/`
 
 ```powershell
-python ashare_train/3b_cnn_hp_search.py --config experiments/E1_image_baseline/config_cnn_hp_ric.yaml --phase all
+python ashare_train/3b_cnn_hp_search.py --config experiments/E1_image_baseline/config_cnn_hp_clean.yaml --phase all
 ```
+
+## 渲染器缺陷评估（clean_spec 第 6 节，只报告）
+
+- M0：旧模型，预测在旧工作区（`config.PRE_CLEAN_WORK_DIR`）。
+- M1：旧数据流程 + Jiang 渲染器。图像由 `ashare_train/2m1_rerender_legacy_windows.py` 生成，配置为 [`config_cnn_m1_rendfix.yaml`](config_cnn_m1_rendfix.yaml)。输入和产物都在 `WORK_SPACE/_olddata/`。
+- 比较：[`eval_clean_cnn_impact.py`](eval_clean_cnn_impact.py) → `docs/results/clean_cnn_impact.md`

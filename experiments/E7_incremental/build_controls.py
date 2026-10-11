@@ -22,7 +22,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from experiments.E7_incremental.common import (  # noqa: E402
-    CTRL_A, CTRL_B, EXT_PANEL, OUT, OUT_DATA, STOCK_INFO, WEEKLY_CONTROLS, limit_state,
+    CTRL_A, CTRL_B, EXT_PANEL, OUT, OUT_DATA, STOCK_INFO, WEEKLY_CONTROLS, limit_flags_at,
 )
 from ashare_train.build_fundamentals import pit_asof  # noqa: E402
 from Misc.config import ASHARE_FUNDAMENTALS_PATH, ASHARE_UNIVERSE_PATH  # noqa: E402
@@ -30,7 +30,6 @@ from Data.clean_window import WINDOW, _ffill_rows  # noqa: E402
 
 PANEL_COLS = ['Date', 'StockID', 'Open', 'High', 'Low', 'Close', 'MA20', 'Vol', 'Amount', 'Turnover', 'FloatMV',
               'TotalMV', 'is_ST']
-LIMIT_COLS = ['Date', 'StockID', 'Open', 'High', 'Low', 'Close_raw', 'adj_factor', 'PreClose', 'LimitUp', 'LimitDown']
 MOM_FROM, MOM_TO = 250, 20
 MIN_RET_VOL = 5
 MIN_DAYS_LIQ = 15
@@ -121,25 +120,14 @@ def window_controls(g: dict, Cf_full: np.ndarray, M: np.ndarray, t: np.ndarray, 
     return out
 
 
-def limit_flags_at(u: pd.DataFrame) -> pd.DataFrame:
-    """limit_state on the full panel (it needs every trading row of a stock), then picked at (StockID, ending_date)."""
-    p = pd.read_feather(EXT_PANEL, columns=LIMIT_COLS)
-    ls = limit_state(p)[['close_up', 'close_dn', 'no_limit']]
-    ls['StockID'] = p['StockID'].astype(str).to_numpy()
-    ls['ending_date'] = p['Date'].to_numpy()
-    del p
-    got = u[['StockID', 'ending_date']].merge(ls, on=['StockID', 'ending_date'], how='left', validate='one_to_one')
-    if got['close_up'].isna().any():
-        raise RuntimeError('universe 行在面板中找不到')
-    return got
-
-
 def main() -> int:
     t0 = time.time()
     u = pd.read_feather(ASHARE_UNIVERSE_PATH, columns=['StockID', 'ending_date', 't_idx', 'split', 'n_obs_in_win',
                                                        'board', 'is_bj', 'MarketCap'])
     u['StockID'] = u['StockID'].astype(str)
     lim = limit_flags_at(u)
+    if lim['close_up'].isna().any():
+        raise RuntimeError('universe 行在面板中找不到')
     print(f'  limit_state {time.time() - t0:.0f}s', flush=True)
 
     p = pd.read_feather(EXT_PANEL, columns=PANEL_COLS)

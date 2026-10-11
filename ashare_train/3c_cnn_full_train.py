@@ -22,7 +22,7 @@ CODE_PKG = os.path.join(PROJECT_ROOT, 'trend_submit', 'trend_code_submit')
 if CODE_PKG not in sys.path:
     sys.path.insert(0, CODE_PKG)
 
-from Misc.config import ASHARE_STOCKS_SAVEPATH, ASHARE_COUNTRY, MA_LAGS, VOLUME_BAR, ASHARE_LOG_DIR
+from Misc.config import ASHARE_STOCKS_SAVEPATH, ASHARE_COUNTRY, MA_LAGS, VOLUME_BAR
 from Data.dgp_config import get_dataset_dir, get_dataset_filename
 from Experiments.cnn_experiment import train_us_model, _build_exp_dir
 from Model.cnn_model import get_full_model_name
@@ -40,7 +40,6 @@ def main():
     os.makedirs(out_root, exist_ok=True)
     shutil.copy2(args.config, os.path.join(out_root, os.path.basename(args.config)))
 
-    os.makedirs(ASHARE_LOG_DIR, exist_ok=True)
     logging.basicConfig(
         level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S',
         handlers=[logging.StreamHandler(),
@@ -48,7 +47,8 @@ def main():
     )
 
     ws, pw, freq = cfg['window_size'], cfg['predict_window'], cfg['freq']
-    dataset_dir = get_dataset_dir(ASHARE_COUNTRY, base_savepath=os.path.join(ASHARE_STOCKS_SAVEPATH, cfg['dataset_subdir']))
+    stocks_root = os.path.join(PROJECT_ROOT, cfg['stocks_root']) if 'stocks_root' in cfg else ASHARE_STOCKS_SAVEPATH
+    dataset_dir = get_dataset_dir(ASHARE_COUNTRY, base_savepath=os.path.join(stocks_root, cfg['dataset_subdir']))
 
     def available(years):
         return [y for y in years

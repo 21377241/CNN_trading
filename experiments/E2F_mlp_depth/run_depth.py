@@ -1,4 +1,4 @@
-"""E2F: fixed-protocol MLP depth robustness on the 120D chrono panel.
+"""E2F: fixed-protocol MLP depth robustness on the clean 140D chrono panel (clean_inputs/features140).
 
 Clean-data MLP-4-140 (clean_spec 5.3):
   python experiments/E2F_mlp_depth/run_depth.py --features-root WORK_SPACE/paper/clean_inputs/features140 \
@@ -25,8 +25,8 @@ from experiments.common.metrics import cross_section_ic, summarize_ic
 from trend_submit.trend_code_submit.Portfolio.portfolio import run_portfolio_analysis
 
 
-FEATURE_ROOT = PROJECT_ROOT / 'WORK_SPACE/paper/E2_matched_is/features'
-OUT_ROOT = PROJECT_ROOT / 'WORK_SPACE/paper/E2F_mlp_depth'
+FEATURE_ROOT = PROJECT_ROOT / 'WORK_SPACE/paper/clean_inputs/features140'
+OUT_ROOT = PROJECT_ROOT / 'WORK_SPACE/paper/E2F_mlp_depth_140'
 SEEDS = [42, 43, 44, 45, 46]
 DEPTHS = {
     'MLP-2': (128, 64),

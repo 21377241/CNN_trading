@@ -31,7 +31,7 @@ CODE_PKG = os.path.join(PROJECT_ROOT, 'trend_submit', 'trend_code_submit')
 if CODE_PKG not in sys.path:
     sys.path.insert(0, CODE_PKG)
 
-from Misc.config import ASHARE_STOCKS_SAVEPATH, ASHARE_COUNTRY, PRE_CLEAN_WORK_DIR, MA_LAGS, VOLUME_BAR
+from Misc.config import ASHARE_COUNTRY, OLD_DATA_WORK_DIR, PRE_CLEAN_WORK_DIR, MA_LAGS, VOLUME_BAR
 from Data.dgp_config import get_dataset_dir, get_dataset_filename
 from Data.chart_library import DrawOHLC
 from Data.ohlc_render import render_ohlc_batch
@@ -43,7 +43,8 @@ WS, FREQ = 20, 'week'
 YEARS = list(range(2000, 2026))
 OLD_PANEL = os.path.join(PRE_CLEAN_WORK_DIR, 'data', 'ashare_processed_data', 'ashare_ret.feather')
 OLD_DIR = get_dataset_dir(ASHARE_COUNTRY, base_savepath=os.path.join(PRE_CLEAN_WORK_DIR, 'data', 'ashare_stocks_dataset', 'I20R5'))
-OUT_DIR = get_dataset_dir(ASHARE_COUNTRY, base_savepath=os.path.join(ASHARE_STOCKS_SAVEPATH, 'I20R5_rendfix'))
+OUT_DIR = get_dataset_dir(ASHARE_COUNTRY, base_savepath=os.path.join(OLD_DATA_WORK_DIR, 'data', 'ashare_stocks_dataset',
+                                                                     'I20R5_rendfix'))
 PANEL_COLS = ['Date', 'StockID', 'Open', 'High', 'Low', 'Close', 'Vol', 'Ret']
 
 

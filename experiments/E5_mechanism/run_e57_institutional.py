@@ -19,9 +19,10 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from experiments.E3_shared_specific.utils import cs_zscore, limit_pct_series, newey_west_t, norm_stock_id
+from experiments.E3_shared_specific.utils import cs_zscore, newey_west_t
+from experiments.E7_incremental.common import limit_flags_at
 from experiments.E5_mechanism.build_forward import build_forward_panel
-from experiments.E5_mechanism.paths import ASHARE_RET, MIN_CS_N, NW_LAG, OUT_ROOT
+from experiments.E5_mechanism.paths import MIN_CS_N, NW_LAG, OUT_ROOT
 from experiments.E5_mechanism.run_e54_pressure import attach_pressure
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
@@ -29,7 +30,6 @@ logger = logging.getLogger('e5_e57')
 
 SCORES = ['S_cnn_sp', 'S_mlp_sp']
 RETS = ['r1', 'R_1_5']
-EPS = 1e-4
 
 
 def _tercile(s: pd.Series) -> pd.Series:
@@ -50,39 +50,20 @@ def _ic(s, r) -> float:
 
 
 def attach_limit_flags(panel: pd.DataFrame) -> pd.DataFrame:
-    """LimitHit / FailedLimit from daily OHLC vs prior close + board rule."""
-    cols = ['Date', 'StockID', 'Open', 'High', 'Low', 'Close']
-    d = pd.read_feather(ASHARE_RET, columns=cols)
-    d['StockID'] = norm_stock_id(d['StockID'])
-    d['Date'] = pd.to_datetime(d['Date'])
-    d = d.sort_values(['StockID', 'Date'])
-    g = d.groupby('StockID', sort=False)
-    d['prev_close'] = g['Close'].shift(1)
-    lim = limit_pct_series(d['StockID'], d['Date'])
-    pc = d['prev_close'].values.astype(float)
-    hi = d['High'].values.astype(float)
-    lo = d['Low'].values.astype(float)
-    cl = d['Close'].values.astype(float)
-    up_px = pc * (1.0 + lim)
-    dn_px = pc * (1.0 - lim)
-    valid = np.isfinite(pc) & (pc > 0) & np.isfinite(hi) & np.isfinite(lo) & np.isfinite(cl)
-
-    touch_up = valid & (hi >= up_px * (1.0 - EPS))
-    touch_dn = valid & (lo <= dn_px * (1.0 + EPS))
-    close_up = valid & (cl >= up_px * (1.0 - EPS))
-    close_dn = valid & (cl <= dn_px * (1.0 + EPS))
-
-    d['LimitHit'] = (close_up | close_dn).astype(float)
-    d['LimitUp'] = close_up.astype(float)
-    d['LimitDn'] = close_dn.astype(float)
-    # Failed: touched intraday but did not close at limit
-    d['FailedLimit'] = ((touch_up & ~close_up) | (touch_dn & ~close_dn)).astype(float)
-    d.loc[~valid, ['LimitHit', 'LimitUp', 'LimitDn', 'FailedLimit']] = np.nan
-
-    lim_df = d[['StockID', 'Date', 'LimitHit', 'LimitUp', 'LimitDn', 'FailedLimit']].rename(
-        columns={'Date': 'ending_date'}
-    )
-    out = panel.merge(lim_df, on=['StockID', 'ending_date'], how='left')
+    """LimitHit / FailedLimit on the signal date from common.limit_state (CSMAR limit prices, exact to the cent).
+    Days without a price limit are NaN."""
+    ls = limit_flags_at(panel)
+    has = ls['no_limit'].notna() & ~ls['no_limit'].astype(bool)
+    flags = {
+        'LimitHit': ls['close_up'].astype(bool) | ls['close_dn'].astype(bool),
+        'LimitUp': ls['close_up'].astype(bool),
+        'LimitDn': ls['close_dn'].astype(bool),
+        'FailedLimit': (ls['touch_up'].astype(bool) & ~ls['close_up'].astype(bool))
+        | (ls['touch_dn'].astype(bool) & ~ls['close_dn'].astype(bool)),
+    }
+    out = panel.copy()
+    for k, v in flags.items():
+        out[k] = np.where(has, v.astype(float), np.nan)
     # Normal = not hit and not failed (clear free trading day)
     out['LimitState'] = 'Normal'
     out.loc[out['FailedLimit'] == 1, 'LimitState'] = 'FailedLimit'

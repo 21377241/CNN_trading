@@ -49,16 +49,3 @@ def daily_triple_resid(sc: np.ndarray, sm: np.ndarray, sh: np.ndarray) -> tuple[
     u_m = sm - LinearRegression().fit(Xch, sm).predict(Xch)
     u_h = sh - LinearRegression().fit(Xcm, sh).predict(Xcm)
     return u_c, u_m, u_h
-
-
-def limit_pct_series(stock_ids: pd.Series, dates: pd.Series) -> np.ndarray:
-    sid = stock_ids.astype(str).str.zfill(6)
-    d = pd.to_datetime(dates)
-    limit = np.full(len(sid), 0.10, dtype=float)
-    s688 = sid.str.startswith('688')
-    chi = sid.str.startswith('300') | sid.str.startswith('301')
-    bj = sid.str.startswith('8') | sid.str.startswith('4')
-    limit = np.where(s688, 0.20, limit)
-    limit = np.where(chi & (d >= pd.Timestamp('2020-08-24')), 0.20, limit)
-    limit = np.where(bj & (d >= pd.Timestamp('2023-09-04')), 0.30, limit)
-    return limit

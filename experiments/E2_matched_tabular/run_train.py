@@ -29,9 +29,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger('e2_train')
 
 
-def load_config(path=None):
-    if path is None:
-        path = os.path.join(os.path.dirname(__file__), 'config.yaml')
+def load_config(path):
     with open(path, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
 
@@ -190,7 +188,7 @@ def main(argv=None):
     parser.add_argument('--only', default='', help='comma list: logit,histgb,mlp (empty = all)')
     parser.add_argument(
         '--config',
-        default=os.path.join(os.path.dirname(__file__), 'config.yaml'),
+        required=True,
         help='path to config yaml',
     )
     args = parser.parse_args(argv)

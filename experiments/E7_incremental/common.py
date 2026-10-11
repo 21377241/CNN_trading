@@ -32,21 +32,24 @@ WEEKLY_RETURNS = OUT_DATA / 'weekly_returns.feather'
 WEEKLY_CONTROLS = OUT_DATA / 'weekly_controls.feather'
 
 KEYS = ['StockID', 'ending_date']
-LIMIT_TOL = 0.005
 OOS_START, OOS_END = pd.Timestamp('2008-01-01'), pd.Timestamp('2026-09-30')
 
-# Protocol section 2: canonical models, files and sha1 (first 16 hex chars).
-CANONICAL = {
-    's_chart': ('WORK_SPACE/paper/E2_matched_is_ind_chrono_ric/preds/pred_cnn_oos.csv', 'be0a89e6b16f522c'),
-    's_1d': ('WORK_SPACE/paper/E2C_temporal_1dcnn_120/preds/pred_1dcnn120_oos.csv', '6f1982cad36565e9'),
-    's_mlp4': ('WORK_SPACE/paper/E2F_mlp_depth/preds/pred_mlp4_oos.csv', '4bf2a2214272f312'),
-}
-SCORES = list(CANONICAL)
+# Canonical OOS predictions of the clean models (clean_spec 5.4): path relative to PROJECT_ROOT and sha1 (first 16
+# hex chars), frozen in registry v2 once training is done. Nothing is read before the registry exists.
+REGISTRY_V2 = PROJECT_ROOT / 'WORK_SPACE' / 'paper' / 'registry_v2.json'
+SCORES = ['s_chart', 's_1d', 's_mlp4']
+CHART_S = 's_chartS'
 
-# Protocol section 14: ChartCNN-S (E2G, 4-8-16, 8,306 parameters, 5-seed ensemble), 18 yearly OOS files.
-CHART_S_DIR = ('WORK_SPACE/paper/E2G_chart_capacity/chartcnn_s/D20L3F53S31D21MP21F53S11D11MP21F53S11D11MP21C256/'
-               '20d5p-lr1E-4-dp0.60-maTrue-vbTrue-weekTrained-noDelayedReturn-e2g-chartcnn_s-ch4-8-16-p5/ensem_res')
-CHART_S_SHA1 = '5ccc6e6cea9fd09c'
+
+def registry_entry(name: str) -> tuple[Path, str]:
+    if not REGISTRY_V2.exists():
+        raise RuntimeError(f'{REGISTRY_V2} 不存在：干净版本模型尚未训练、冻结（C3）')
+    e = json.loads(REGISTRY_V2.read_text(encoding='utf-8'))['predictions'][name]
+    return PROJECT_ROOT / e['path'], e['sha1']
+
+
+def canonical_sha1() -> dict:
+    return {k: registry_entry(k)[1] for k in SCORES + [CHART_S]} if REGISTRY_V2.exists() else {}
 
 CTRL_A = ['rev_1w', 'ret_20d', 'max_20d', 'vol_20d', 'vtrend', 'range_20d', 'clv_20d', 'ma_gap']
 CTRL_B = ['mom_12_1', 'size', 'turn_20d', 'illiq_20d', 'ivol_20d', 'bm', 'ep']
@@ -61,44 +64,31 @@ def sha1_16(path: Path) -> str:
     return h.hexdigest()[:16]
 
 
+def load_prediction(name: str) -> pd.DataFrame:
+    """One registered OOS prediction file (KEYS, up_prob -> name); aborts if its sha1 differs from registry v2."""
+    path, expected = registry_entry(name)
+    got = sha1_16(path)
+    if got != expected:
+        raise RuntimeError(f'{name}: sha1 {got} != registry {expected} ({path})')
+    df = pd.read_csv(path, usecols=KEYS + ['up_prob'], dtype={'StockID': str})
+    df['StockID'] = df['StockID'].str.zfill(6)
+    df['ending_date'] = pd.to_datetime(df['ending_date'])
+    return df.rename(columns={'up_prob': name})
+
+
 def load_canonical_preds() -> pd.DataFrame:
-    """Inner join of the three canonical OOS predictions; aborts if any file hash differs from the protocol."""
-    out = None
-    for name, (rel, expected) in CANONICAL.items():
-        path = PROJECT_ROOT / rel
-        got = sha1_16(path)
-        if got != expected:
-            raise RuntimeError(f'{name}: sha1 {got} != protocol {expected} ({rel})')
-        cols = KEYS + ['up_prob'] + (['ret_val'] if out is None else [])
-        df = pd.read_csv(path, usecols=cols, dtype={'StockID': str})
-        df['StockID'] = df['StockID'].str.zfill(6)
-        df['ending_date'] = pd.to_datetime(df['ending_date'])
-        df = df.rename(columns={'up_prob': name})
-        out = df if out is None else out.merge(df, on=KEYS, how='inner')
+    """Inner join of the three canonical OOS predictions with the universe label (ret_val)."""
+    from Misc.config import ASHARE_UNIVERSE_PATH
+    out = pd.read_feather(ASHARE_UNIVERSE_PATH, columns=KEYS + ['split', 'ret_label'])
+    out = out[out['split'] == 'oos'].drop(columns='split').rename(columns={'ret_label': 'ret_val'})
+    out['StockID'] = out['StockID'].astype(str)
+    for name in SCORES:
+        out = out.merge(load_prediction(name), on=KEYS, how='inner')
     return out
 
 
-def chart_s_files() -> list[Path]:
-    files = sorted((PROJECT_ROOT / CHART_S_DIR).glob('ensem5_res_*.csv'))
-    if len(files) != 18:
-        raise RuntimeError(f'ChartCNN-S: expected 18 OOS years, found {len(files)}')
-    return files
-
-
-def chart_s_sha1() -> str:
-    """sha1 (first 16 hex) of the newline-joined per-file sha1s of the 18 yearly files, in file-name order."""
-    return hashlib.sha1('\n'.join(sha1_16(f) for f in chart_s_files()).encode()).hexdigest()[:16]
-
-
 def load_chart_s() -> pd.DataFrame:
-    got = chart_s_sha1()
-    if got != CHART_S_SHA1:
-        raise RuntimeError(f's_chartS: sha1 {got} != protocol {CHART_S_SHA1}')
-    df = pd.concat([pd.read_csv(f, usecols=KEYS + ['up_prob'], dtype={'StockID': str}) for f in chart_s_files()],
-                   ignore_index=True)
-    df['StockID'] = df['StockID'].str.zfill(6)
-    df['ending_date'] = pd.to_datetime(df['ending_date'])
-    return df.rename(columns={'up_prob': 's_chartS'})
+    return load_prediction(CHART_S)
 
 
 def week_ends(calendar: pd.DatetimeIndex) -> pd.DatetimeIndex:
@@ -106,55 +96,6 @@ def week_ends(calendar: pd.DatetimeIndex) -> pd.DatetimeIndex:
     d = pd.DataFrame({'Date': pd.DatetimeIndex(calendar).sort_values()})
     iso = d['Date'].dt.isocalendar()
     return pd.DatetimeIndex(d.groupby(iso['year'] * 100 + iso['week'])['Date'].max().sort_values().values)
-
-
-CHINEXT_REFORM = pd.Timestamp('2020-08-24')
-MAIN_REGISTRATION = pd.Timestamp('2023-04-10')
-MAIN_ST_10PCT = pd.Timestamp('2025-07-07')
-
-
-def limit_pct(stock: pd.Series, date: pd.Series, is_st=None, age=None, first_trade=None,
-              data_start: pd.Timestamp | None = None) -> np.ndarray:
-    """当日涨跌幅限制；无涨跌幅限制的交易日为 NaN（与之比较的判定恒为 False）。
-
-    is_st: 当日是否 ST。主板（含改革前创业板）ST 为 5%，2025-07-07 起主板 ST 为 10%；改革后创业板、科创板 ST 仍为 20%。
-    age: 上市后第几个交易日（0 = 上市首日）；first_trade: 股票在面板中的首个交易日。
-      首个交易日晚于 data_start（即上市日在数据内）时：上市首日不设限；科创板、2020-08-24 起上市的创业板、
-      2023-04-10 起上市的主板，前 5 个交易日不设限。
-    """
-    s = pd.Series(np.asarray(stock).astype(str))
-    dt = pd.to_datetime(pd.Series(np.asarray(date)))
-    lim = np.full(len(s), 0.10)
-    is_chinext = s.str.startswith(('300', '301')).to_numpy()
-    chinext_post = is_chinext & (dt >= CHINEXT_REFORM).to_numpy()
-    star = s.str.startswith(('688', '689')).to_numpy()
-    bse = s.str.startswith(('4', '8', '92')).to_numpy()
-    lim[chinext_post | star] = 0.20
-    lim[bse] = 0.30
-    if is_st is not None:
-        st = np.asarray(is_st).astype(bool)
-        main_like = st & ~(chinext_post | star | bse)
-        lim[main_like] = np.where((dt >= MAIN_ST_10PCT).to_numpy()[main_like], 0.10, 0.05)
-    if age is not None and first_trade is not None:
-        age = np.asarray(age, dtype=np.float64)
-        ft = pd.to_datetime(pd.Series(np.asarray(first_trade)))
-        listed_in_data = (ft > (data_start or ft.min())).to_numpy()
-        five_day = star | (is_chinext & (ft >= CHINEXT_REFORM).to_numpy()) | \
-            (~(is_chinext | star | bse) & (ft >= MAIN_REGISTRATION).to_numpy())
-        no_limit = listed_in_data & ((age == 0) | (five_day & (age < 5)))
-        lim[no_limit] = np.nan
-    return lim
-
-
-def hit_limit_band(ret, lim, side: str = 'up') -> np.ndarray:
-    """旧区间规则（只用于与 limit_state 对账）：收益落在 [限制幅度 − 容差, 限制幅度 + 容差] 内视为触及涨（跌）停。
-    lim 为 NaN（无涨跌幅限制）时恒为 False。"""
-    r = np.asarray(ret, dtype=np.float64)
-    lim = np.asarray(lim, dtype=np.float64)
-    if side == 'dn':
-        r = -r
-    with np.errstate(invalid='ignore'):
-        return (r >= lim - LIMIT_TOL) & (r <= lim + LIMIT_TOL)
 
 
 PRICE_TOL = 0.005
@@ -218,6 +159,25 @@ def limit_state(p: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+LIMIT_INPUT_COLS = ['Date', 'StockID', 'Open', 'High', 'Low', 'Close_raw', 'adj_factor', 'PreClose', 'LimitUp',
+                    'LimitDown']
+
+
+def limit_flags_at(keys: pd.DataFrame, date_col: str = 'ending_date') -> pd.DataFrame:
+    """limit_state on the full panel, picked at keys (StockID, date_col); returned in the order of keys.
+    Keys without a trading row get NaN in every flag column."""
+    p = pd.read_feather(EXT_PANEL, columns=LIMIT_INPUT_COLS)
+    ls = limit_state(p).drop(columns=['up_price', 'dn_price'])
+    ls['StockID'] = p['StockID'].astype(str).to_numpy()
+    ls[date_col] = p['Date'].to_numpy()
+    del p
+    k = pd.DataFrame({'StockID': keys['StockID'].astype(str).str.zfill(6).to_numpy(),
+                      date_col: pd.to_datetime(keys[date_col]).to_numpy()})
+    out = k.merge(ls, on=['StockID', date_col], how='left', validate='many_to_one')
+    out.index = keys.index
+    return out.drop(columns=['StockID', date_col])
+
+
 def cs_rank(df: pd.DataFrame, cols: list[str], by: str = 'ending_date') -> pd.DataFrame:
     """Cross-sectional rank mapped linearly to [-0.5, 0.5]; NaN stays NaN."""
     g = df.groupby(by, sort=False)[cols]
@@ -254,7 +214,7 @@ def git_hash() -> str:
 def write_manifest(name: str, extra: dict | None = None) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     m = {'script': name, 'git': git_hash(), 'time': datetime.now().isoformat(timespec='seconds'),
-         'canonical_sha1': {k: v[1] for k, v in CANONICAL.items()}}
+         'canonical_sha1': canonical_sha1()}
     m.update(extra or {})
     (OUT / f'run_manifest_{name}.json').write_text(json.dumps(m, indent=2, ensure_ascii=False, default=str),
                                                    encoding='utf-8')

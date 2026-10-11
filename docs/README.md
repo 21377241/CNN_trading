@@ -19,6 +19,12 @@
 
 | 文档 | 内容 |
 |---|---|
+| [clean_spec.md](protocol/clean_spec.md) | 干净版本规格；第 9 节为追加记录（CSMAR 换源、第二轮输入、clean 分支与旧数据隔离） |
+| [csmar_panel_audit.md](protocol/csmar_panel_audit.md) | CSMAR 面板独立审计（从原始 zip 重算，不读旧数据） |
+| [ch_factor_check.md](protocol/ch_factor_check.md) | 自建 CH-3/CH-4 因子与官方文件核对 |
+| [pre_clean_reconciliation.md](protocol/pre_clean_reconciliation.md) | 与旧数据的对账（面板、样本键、窗口路径），只报告，不进入任何结果 |
+| [clean_data_reconciliation.md](protocol/clean_data_reconciliation.md) | 历史：旧数据上的干净版本验收（tag `clean-olddata-v1`） |
+| [E7_protocol_v2.md](protocol/E7_protocol_v2.md)、[E9_protocol.md](protocol/E9_protocol.md)、[E10_protocol.md](protocol/E10_protocol.md) | 干净版本的分析协议草案，C4 冻结（tag `protocol-clean-v1`） |
 | [model_registry.md](protocol/model_registry.md) | 规范模型、预测文件与 sha1；各报告使用了哪个文件 |
 | [E0_reconciliation.md](protocol/E0_reconciliation.md) | 统一口径下的主表；各报告数字差异的来源 |
 | [E0_data_timing.md](protocol/E0_data_timing.md) | 数据字典、信息时点、标签与执行摩擦审计 |

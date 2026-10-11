@@ -9,9 +9,9 @@ docs/protocol/csmar_panel_audit.md。
 阶段:
   e1    截断重算（面板、财务时点表、市场表在截断点之前逐位相同）
   raw   原始文件重算：A0 逐列重算比对，A1–A6，B1–B10
-  old   与旧数据商面板对账：D1、D2、F2
   fund  财务与市场：E2、E3、F1、F3、F4、M1
   ext   第三方（akshare）抽查：C1、C2
+与旧数据商数据的对账（原 D1、D2、F2）不属于审计，移到 reconcile_pre_clean.py；本脚本不读取任何旧数据。
 
 用法:
   python ashare_train/audit_csmar_panel.py                 # 全部阶段
@@ -52,7 +52,6 @@ logger = logging.getLogger('audit')
 
 AUDIT_DIR = Path(ASHARE_PROCESSED_DATA_DIR, 'audit')
 REPORT = Path(PROJECT_ROOT, 'docs', 'protocol', 'csmar_panel_audit.md')
-OLD_PANEL = Path(WORK_DIR, '_olddata', 'data', 'ashare_processed_data', 'ashare_ret.feather')
 TRUNC_END = '2015-06-30'
 TRUNC_DIR = Path(WORK_DIR, 'tmp', 'audit_trunc')
 SEED = 20261011
@@ -741,152 +740,6 @@ def phase_raw() -> None:
     save_phase('raw', results, details)
 
 
-# --------------------------------------------------------------------------------------------- phase old
-
-def phase_old() -> None:
-    results, details = [], {}
-    new = {c: panel_col(ASHARE_PANEL_PATH, c) for c in ['StockID', 'Date', 'Ret', 'Ret_nd', 'adj_factor', 'Markettype',
-                                                         'TotalMV']}
-    new['day'] = day_int(new.pop('Date'))
-    kn = (new['StockID'] << 20) | new['day']
-    old = {c: panel_col(OLD_PANEL, c) for c in ['StockID', 'Date', 'Ret', 'pct_chg', 'PB', 'PE_TTM']}
-    old['day'] = day_int(old.pop('Date'))
-    ko = (old['StockID'] << 20) | old['day']
-    oo = np.argsort(ko, kind='stable')
-    for c in old:
-        old[c] = old[c][oo]
-    ko = ko[oo]
-    if (np.diff(kn) <= 0).any() or (np.diff(ko) <= 0).any():
-        raise ValueError('panel keys not unique / not sorted')
-    _, i_n, i_o = np.intersect1d(kn, ko, assume_unique=True, return_indices=True)
-    details['overlap_rows'] = len(i_n)
-
-    # D1
-    rn, ro = new['Ret'][i_n], old['Ret'][i_o]
-    both = np.isfinite(rn) & np.isfinite(ro)
-    diff = np.abs(rn - ro)
-    within = diff[both] <= 0.001
-    d1 = float(within.mean())
-    nn = len(new['day'])
-    first_new = np.r_[True, new['StockID'][1:] != new['StockID'][:-1]]
-    prev_n = np.r_[0, np.arange(nn - 1)]
-    jump = new['adj_factor'] / new['adj_factor'][prev_n] - 1
-    jump[first_new] = np.nan
-    first_old = np.r_[True, old['StockID'][1:] != old['StockID'][:-1]]
-    gap_new = np.where(first_new, -1, new['day'] - new['day'][prev_n])
-    prev_o = np.r_[0, np.arange(len(ko) - 1)]
-    gap_old = np.where(first_old, -1, old['day'] - old['day'][prev_o])
-    bad = np.flatnonzero(both)[~within]
-    rng = np.random.default_rng(SEED)
-    samp = rng.choice(bad, size=min(100, len(bad)), replace=False)
-
-    def why(k: int) -> str:
-        jn, jo = i_n[k], i_o[k]
-        if gap_new[jn] != gap_old[jo]:
-            return '前一交易行不同（一方缺日）'
-        if np.isfinite(jump[jn]) and abs(jump[jn]) > 1e-4:
-            if np.isfinite(old['pct_chg'][jo]) and abs(old['pct_chg'][jo] / 100 - new['Ret_nd'][jn]) < 0.001:
-                return '除权日：旧面板复权收益错误（旧涨跌幅与新 Ret_nd 一致）'
-            return '除权日：复权方法差异'
-        if np.isfinite(old['pct_chg'][jo]) and abs(old['pct_chg'][jo] / 100 - new['Ret_nd'][jn]) < 0.001:
-            return '非除权日：旧面板复权价错误（旧涨跌幅与新一致）'
-        return '其他'
-
-    att = pd.Series([why(k) for k in samp]).value_counts()
-    all_cat = pd.Series([why(k) for k in bad]).value_counts() if len(bad) <= 200000 else None
-    details['D1_sample100_attribution'] = att.to_dict()
-    if all_cat is not None:
-        details['D1_all_attribution'] = all_cat.to_dict()
-    details['D1_examples'] = [(f'{new["StockID"][i_n[k]]:06d}', day_str(new['day'][i_n[k]]), float(rn[k]), float(ro[k]),
-                               why(k)) for k in samp[:30]]
-    yb = pd.Series(new['day'][i_n[bad]].astype('datetime64[D]')).dt.year.value_counts().sort_index()
-    details['D1_exceed_by_year'] = yb.to_dict()
-    results.append(result('D1', '与旧面板重叠股票-日的日收益', '差异 ≤ 0.1 个百分点 ≥ 98%；超出的抽 100 条归因',
-                          f'重叠 {both.sum():,} 行，{d1:.4%} 在 0.1pp 内；超出 {len(bad):,} 行；抽样归因 {att.to_dict()}',
-                          d1 >= 0.98))
-
-    # D2
-    only_new = np.setdiff1d(np.arange(nn), i_n, assume_unique=True)
-    only_old = np.setdiff1d(np.arange(len(ko)), i_o, assume_unique=True)
-    old_max = old['day'].max()
-    old_codes = np.unique(old['StockID'])
-    first_old_day = pd.Series(old['day']).groupby(old['StockID']).min()
-    cat_n = np.full(len(only_new), '其他', dtype=object)
-    s_n, d_n = new['StockID'][only_new], new['day'][only_new]
-    in_old_stock = np.isin(s_n, old_codes)
-    f_old = first_old_day.reindex(s_n).to_numpy()
-    cat_n[~in_old_stock] = '旧面板无此股票'
-    cat_n[in_old_stock & (d_n < f_old)] = '早于旧面板该股首日'
-    cat_n[d_n > old_max] = '晚于旧面板截止日'
-    cat_n[new['Markettype'][only_new] == 64] = '北交所'
-    fills = pd.read_parquet(Path(AUDIT_DIR, 'raw_fill_keys.parquet'))
-    fills['Stkcd'] = fills['Stkcd'].replace(CODE_MAP)
-    kf = (fills['Stkcd'].to_numpy(np.int64) << 20) | fills['day'].to_numpy()
-    fmap = pd.Series(fills['Filling'].to_numpy(), index=kf)
-    fmap = fmap[~fmap.index.duplicated()]
-    k_oo = ko[only_old]
-    fill_of = fmap.reindex(k_oo).to_numpy()
-    cat_o = np.full(len(only_old), '其他', dtype=object)
-    cat_o[~np.isin(old['StockID'][only_old], np.unique(new['StockID']))] = '新面板无此股票'
-    s_o, d_o = old['StockID'][only_old], old['day'][only_old]
-    merged_old = np.isin(s_o, list(CODE_MAP))
-    cat_o[merged_old] = '已并入新代码的旧代码'
-    dup_key = (pd.Series(s_o).map(CODE_MAP).fillna(-1).to_numpy(np.int64) << 20) | d_o.astype(np.int64)
-    dup = merged_old & np.isin(dup_key, ko)
-    cat_o[dup] = '已并入新代码的旧代码（旧面板在新代码下另有同日行，即重复历史）'
-    details['D2_old_duplicate_history'] = pd.Series(s_o[dup]).map(lambda c: f'{c:06d}').value_counts().to_dict()
-    for code, dt in CODE_REUSE.items():
-        cat_o[(old['StockID'][only_old] == code) & (old['day'][only_old] < day_int([np.datetime64(dt)])[0])] = '代码复用的前身段'
-    cat_o[fill_of == 1] = 'CSMAR 标为停牌（Filling = 1）'
-    cat_o[fill_of == 2] = 'CSMAR 标为节假日（Filling = 2）'
-    cat_o[old['day'][only_old] > day_int([np.datetime64(SAMPLE_END)])[0]] = '晚于样本截止日'
-    cn, co_ = pd.Series(cat_n).value_counts(), pd.Series(cat_o).value_counts()
-    details['D2_new_only'] = cn.to_dict()
-    details['D2_old_only'] = co_.to_dict()
-    oth_o = only_old[cat_o == '其他']
-    details['D2_old_only_other_examples'] = [(f'{old["StockID"][j]:06d}', day_str(old['day'][j])) for j in oth_o[:30]]
-    details['D2_old_only_other_by_year'] = pd.Series(old['day'][oth_o].astype('datetime64[D]')).dt.year.value_counts().sort_index().to_dict()
-    oth_n = only_new[cat_n == '其他']
-    details['D2_new_only_other_examples'] = [(f'{new["StockID"][j]:06d}', day_str(new['day'][j])) for j in oth_n[:30]]
-    details['D2_new_only_other_by_year'] = pd.Series(new['day'][oth_n].astype('datetime64[D]')).dt.year.value_counts().sort_index().to_dict()
-    results.append(result('D2', '只在新或旧面板出现的股票-日', '分类并解释',
-                          f'只在新面板 {len(only_new):,}：{cn.to_dict()}；只在旧面板 {len(only_old):,}：{co_.to_dict()}', None,
-                          '“其他”类见详情中的样例与年份分布'))
-
-    # F2 valuation ratios vs old PB / PE
-    fund = pd.read_parquet(ASHARE_FUNDAMENTALS_PATH, columns=['StockID', 'Accper', 'avail_date', 'BE', 'NI_TTM'])
-    fund['code'] = fund['StockID'].astype(int)
-    fund = fund.sort_values(['avail_date', 'Accper'])
-    cal = np.unique(new['day'][np.isin(new['Markettype'], [1, 4])])
-    me = pd.Series(cal).groupby(pd.Series(cal.astype('datetime64[D]')).dt.to_period('M')).max()
-    me = me[(me.index >= pd.Period('2008-01', 'M')) & (me.index <= pd.Period('2025-12', 'M'))]
-    me = me[me <= old_max]
-    rows = []
-    in_new = np.isin(new['Markettype'], MAIN_MARKETS)
-    for per, d in me.items():
-        an = np.flatnonzero((new['day'] == d) & in_new)
-        ao = np.flatnonzero(old['day'] == d)
-        nd = pd.DataFrame({'code': new['StockID'][an], 'mv': new['TotalMV'][an]})
-        od = pd.DataFrame({'code': old['StockID'][ao], 'PB': old['PB'][ao], 'PE': old['PE_TTM'][ao]})
-        ts = pd.Timestamp(np.datetime64(int(d), 'D'))
-        fl = fund[fund['avail_date'] <= ts].groupby('code')[['BE', 'NI_TTM']].last()
-        x = nd.merge(od, on='code').merge(fl, left_on='code', right_index=True, how='left')
-        bm_n = np.where(x['BE'] > 0, x['BE'] / x['mv'], np.nan)
-        bm_o = np.where(x['PB'] > 0, 1 / x['PB'], np.nan)
-        ep_n = x['NI_TTM'] / x['mv']
-        ep_o = np.where(x['PE'] != 0, 1 / x['PE'], np.nan)
-        r1 = pd.Series(bm_n).corr(pd.Series(bm_o), method='spearman')
-        r2 = pd.Series(ep_n).corr(pd.Series(ep_o), method='spearman')
-        rows.append({'month': str(per), 'n': len(x), 'rho_bm': r1, 'rho_ep': r2})
-    rf2 = pd.DataFrame(rows)
-    details['F2_by_month'] = rf2.to_dict('records')
-    mb, mp = float(rf2['rho_bm'].median()), float(rf2['rho_ep'].median())
-    results.append(result('F2', 'BM、EP 与旧数据商 PB、PE 倒数的截面秩相关（月末，2008 起）', '中位数 ≥ 0.9',
-                          f'{len(rf2)} 个月；BM 中位 {mb:.3f}（最小 {rf2["rho_bm"].min():.3f}）；EP 中位 {mp:.3f}（最小 {rf2["rho_ep"].min():.3f}）',
-                          mb >= 0.9 and mp >= 0.9))
-    save_phase('old', results, details)
-
-
 # --------------------------------------------------------------------------------------------- phase fund
 
 def phase_fund() -> None:
@@ -1123,7 +976,7 @@ def phase_ext() -> None:
 # --------------------------------------------------------------------------------------------- report
 
 ORDER = ['A0', 'A0s', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10',
-         'C1', 'C2', 'D1', 'D2', 'E1', 'E2', 'E3', 'F1', 'F2', 'F3', 'F4', 'M1']
+         'C1', 'C2', 'E1', 'E2', 'E3', 'F1', 'F3', 'F4', 'M1']
 
 
 def write_report() -> None:
@@ -1153,7 +1006,7 @@ def write_report() -> None:
     logger.info(f'写出 {REPORT}')
 
 
-PHASES = {'e1': phase_e1, 'raw': phase_raw, 'old': phase_old, 'fund': phase_fund, 'ext': phase_ext}
+PHASES = {'e1': phase_e1, 'raw': phase_raw, 'fund': phase_fund, 'ext': phase_ext}
 
 
 def main(argv=None) -> int:

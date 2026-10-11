@@ -1,21 +1,23 @@
 # 实验索引（Same Information, Distinct Signals；目标期刊 JEF）
 
+clean 分支只使用 CSMAR 数据（`docs/protocol/clean_spec.md` 第 9 节“clean 分支与旧数据隔离”）。下表“已完成”是旧数据上的结果，属于历史记录；按 clean_spec 第 8 节，C5 阶段重跑保留的实验，不保留的实验已删除代码。守卫检查：`python tests/test_clean_independence.py`。
+
 约定：
-- 每个实验一个目录 `experiments/E*_*/`，产物写入 `WORK_SPACE/paper/` 下的对应目录，不覆盖 `WORK_SPACE/ashare_model_res_*`。
+- 每个实验一个目录 `experiments/E*_*/`，产物写入 `WORK_SPACE/paper/` 下的对应目录。
 - 规范模型与预测文件以 [`docs/protocol/model_registry.md`](../docs/protocol/model_registry.md) 为准，统计口径以 [`docs/protocol/E0_reconciliation.md`](../docs/protocol/E0_reconciliation.md) 第 5 节为准。
 - 新代码的公共函数放在 `common/`：面板读取 `panel.py`，样本切分 `splits.py`，IC、Newey–West t 和 Sharpe 在 `metrics.py`。旧实验目录里各自的 `utils.py` 保持不变，以免影响已有结果的复现。
 - 全部文档的索引见 [`docs/README.md`](../docs/README.md)。
 
-## 已完成
+## 已完成（旧数据，历史记录）
 
 | ID | 内容 | 目录 | 产物（`WORK_SPACE/paper/`） | 结果文档 |
 |---|---|---|---|---|
 | E1 / E1b | 图像基线 I20R5；A 股 CNN 超参本地化（按验证期 Rank IC 选参） | `E1_image_baseline/`，训练用 `ashare_train/` | `E1b_cnn_hp_I20R5/`、`E1b_cnn_hp_I20R5_ric/` | [results/paper_results_E1b.md](../docs/results/paper_results_E1b.md) |
 | E2 | 同信息集基准：Logit、HistGB、MLP | `E2_matched_tabular/` | `E2_matched_is*`（规范版为 `E2_matched_is_ind_chrono_ric/`） | [results/paper_results_E2.md](../docs/results/paper_results_E2.md) |
-| E2A | +60 维图形指标的机制拆解 | `E2_matched_tabular/run_e2a_*.py` | `E2A_*` | [results/paper_results_E2A.md](../docs/results/paper_results_E2A.md) |
-| E2B | CNN 与 HistGB/MLP 的信息互补 | `E2_matched_tabular/run_e2b_complement.py` | `E2B_*` | [results/paper_results_E2B.md](../docs/results/paper_results_E2B.md) |
+| E2A | +60 维图形指标的机制拆解 | 不保留（代码已删除） | `E2A_*` | [results/paper_results_E2A.md](../docs/results/paper_results_E2A.md) |
+| E2B | CNN 与 HistGB/MLP 的信息互补 | 不保留（代码已删除） | `E2B_*` | [results/paper_results_E2B.md](../docs/results/paper_results_E2B.md) |
 | E2C | 时序数值基准 1D-CNN-120 | `E2C_temporal/` | `E2C_temporal_1dcnn_120/` | [results/paper_E2C_temporal_numerical_benchmark_report.md](../docs/results/paper_E2C_temporal_numerical_benchmark_report.md) |
-| E2D | 流动性与可实施性审计（已被取代，由 E9 重做） | `E2D_liquidity/` | `E2D_liquidity_audit*` | [archive/superseded/](../docs/archive/superseded/) |
+| E2D | 流动性与可实施性审计（已被取代，由 E9 重做） | 不保留（代码已删除） | `E2D_liquidity_audit*` | [archive/superseded/](../docs/archive/superseded/) |
 | E2F | MLP 深度稳健性（2/3/4/5 层，120D） | `E2F_mlp_depth/` | `E2F_mlp_depth/` | [results/paper_E2F_mlp_depth_robustness.md](../docs/results/paper_E2F_mlp_depth_robustness.md) |
 | E2G | 参数量匹配的 chart-CNN 容量控制 | `E2G_chart_capacity/` | `E2G_chart_capacity/`（旧的无效结果在 `_invalid_fullwidth/`） | [results/paper_results_E2G.md](../docs/results/paper_results_E2G.md) |
 | E3 / E3T | 共享信号与模型特有信号的分解 | `E3_shared_specific/` | `E3_shared_specific_*`、`E3T_cnn_1d_temporal/` | [results/paper_results_E3.md](../docs/results/paper_results_E3.md) |
@@ -38,8 +40,7 @@
 ## 复现示例
 
 ```powershell
-cd e:\phd\LLM_trading\CNN_trading
-python experiments/E0_audit/build_registry.py
-python experiments/E0_audit/reconcile_metrics.py
-python experiments/E0_audit/audit_timing.py
+cd e:\phd\LLM_trading\CNN_trading_clean
+.\scripts\run_ashare.ps1                 # CSMAR 数据流程（面板到 E7 数据）
+python tests/test_clean_independence.py
 ```
