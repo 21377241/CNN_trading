@@ -2,7 +2,7 @@
 
 Clean-data MLP-4-140 (clean_spec 5.3):
   python experiments/E2F_mlp_depth/run_depth.py --features-root WORK_SPACE/paper/clean_inputs/features140 \
-      --out-root WORK_SPACE/paper/E2F_mlp_depth_140 --depths MLP-4 --tag 140 --no-portfolio
+      --out-root WORK_SPACE/paper/E2F_mlp_depth_140 --depths MLP-4 --tag 140 --no-oos-metrics
 """
 from __future__ import annotations
 
@@ -66,6 +66,8 @@ def main() -> int:
     ap.add_argument('--tag', default='', help='suffix for model names and prediction files, e.g. 140')
     ap.add_argument('--no-portfolio', action='store_true',
                     help='skip run_portfolio_analysis; EW/VW Sharpe from seed_metrics on labelled rows')
+    ap.add_argument('--no-oos-metrics', action='store_true',
+                    help='write OOS predictions and validation metrics only (training before the protocol freeze)')
     args = ap.parse_args()
     if args.features_root:
         FEATURE_ROOT = PROJECT_ROOT / args.features_root
@@ -75,7 +77,7 @@ def main() -> int:
         DEPTHS = {k: DEPTHS[k] for k in args.depths}
     if args.tag:
         DEPTHS = {f'{k}-{args.tag}': v for k, v in DEPTHS.items()}
-    pred_ext = 'parquet' if args.no_portfolio else 'csv'
+    pred_ext = 'parquet' if (args.no_portfolio or args.no_oos_metrics) else 'csv'
 
     OUT_ROOT.mkdir(parents=True, exist_ok=True)
     X_is = np.load(FEATURE_ROOT / 'X_is.npy')
@@ -119,6 +121,14 @@ def main() -> int:
         out = meta_oos[['StockID', 'ending_date', 'ret_val', 'MarketCap', 'binary_label']].copy()
         out['up_prob'] = score
         pred_path = pred_dir / f'pred_{name.lower().replace("-", "")}_oos.{pred_ext}'
+        if args.no_oos_metrics:
+            full = out.assign(StockID=out['StockID'].astype(str))
+            for seed, s in zip(SEEDS, seed_scores):
+                full[f'up_prob_seed{seed}'] = s
+            full.to_parquet(pred_path, index=False)
+            rows.append({'model': name, 'hidden_layer_sizes': str(hidden), 'val_ensemble_rank_ic': val_ensemble_ic,
+                         'n_seeds': len(SEEDS), 'n_oos': len(out)})
+            continue
         ew = vw = np.nan
         if args.no_portfolio:
             full = out.assign(StockID=out['StockID'].astype(str))
@@ -162,6 +172,10 @@ def main() -> int:
         pd.DataFrame(seed_rows).to_csv(
             OUT_ROOT / f'{name.lower().replace("-", "")}_seed_metrics.csv',
             index=False, float_format='%.6f')
+    if args.no_oos_metrics:
+        pd.DataFrame(rows).to_csv(OUT_ROOT / 'val_summary.csv', index=False, float_format='%.6f')
+        print(pd.DataFrame(rows).to_string(index=False))
+        return 0
     pd.DataFrame(rows).to_csv(OUT_ROOT / 'e2f_depth_summary.csv', index=False, float_format='%.6f')
     seed_df = pd.concat([
         pd.read_csv(OUT_ROOT / f'{name.lower().replace("-", "")}_seed_metrics.csv')

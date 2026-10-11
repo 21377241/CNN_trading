@@ -652,6 +652,8 @@ def _generate_oos_predictions(exp_dir, ws, pw, img_h, img_w,
     for ens_idx in range(n_ensembles):
         ckpt_path = os.path.join(exp_dir, f'checkpoint{ens_idx}.pth.tar')
         if not os.path.exists(ckpt_path):
+            if sample_mode == 'oos':
+                raise FileNotFoundError(f'找不到 checkpoint {ckpt_path}（集成需要 {n_ensembles} 个）')
             logger.warning(f"找不到 checkpoint {ckpt_path}")
             continue
         ckpt = torch.load(ckpt_path, map_location='cpu')
@@ -675,10 +677,14 @@ def _generate_oos_predictions(exp_dir, ws, pw, img_h, img_w,
         try:
             oos_dataset = _dataset([year], ws, pw, freq, has_vb, ma_lags, country, dataset_dir, sample_mode)
         except RuntimeError as e:
+            if sample_mode == 'oos':
+                raise
             logger.warning(f"OOS 数据加载失败 ({year}): {e}")
             continue
 
         if len(oos_dataset) == 0:
+            if sample_mode == 'oos':
+                raise RuntimeError(f'{year} 年 OOS 数据为空')
             logger.warning(f"{year} 年 OOS 数据为空，跳过。")
             continue
 

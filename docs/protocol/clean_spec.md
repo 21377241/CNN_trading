@@ -476,3 +476,27 @@ E2G、E3/E4/E5（含 T 版本）、E6A、E0 registry/主表脚本的默认输入
   - 不存在旧实验目录；
   - 图像数据集目录都以 `_clean` 结尾；
   - 日面板含 CSMAR 特有的列，且不含旧数据商的列。
+
+### 2026-10-12 C3 训练前补充：最终模型的选定与 registry v2（写于训练开始后、任何试验完成前）
+
+**1. chart-CNN 最终组合**
+
+- 第 5.1 节只规定了搜参流程，没有规定第三阶段完整训练的几组中选哪一组。旧流程实际按 OOS 组合 Sharpe 比较，属于前视，已删除（见上一节第 5 项）。
+- 规则：在第三阶段完整训练的各组（第二阶段前 1–2 名，加上锚点 lr 1e-5、dropout 0.5、patience 2）中，取 5 个成员“loss 最优 checkpoint 的验证集 Rank IC”的均值，均值最高的一组即为 `chartcnn_clean`。这与第 5.1 节的试验得分定义相同。
+- 选定只用验证集（2006–2007），不看任何 OOS 结果。
+
+**2. 1D-CNN-140 与 MLP-4-140**
+
+- 不搜参，按第 5.2、5.3 节的固定设定训练，各 5 个 seed（42–46），预测取平均。
+- 训练时只输出验证集指标：`run_depth.py` 使用 `--no-oos-metrics`；`train_1dcnn.py` 本身只写预测。
+
+**3. registry v2（`ashare_train/build_registry_v2.py` → `WORK_SPACE/paper/registry_v2.json`）**
+
+- 登记名：`chartcnn_clean`、`onedcnn_140`、`mlp4_140`；`chartcnn_s` 在 C5 训练后追加。
+- 预测复制到 `WORK_SPACE/paper/registry_v2/preds/`，记录完整 sha1。
+- 登记前的验收：
+  - 由保存的权重重新预测（chart-CNN 的 checkpoint、1D-CNN 的 `best.pt`、MLP 的 joblib），与预测文件逐行比对，最大绝对差 ≤ 1e-4；
+  - 样本键与 universe 的 OOS 键完全相同（行数、无重复、集合一致）；
+  - `up_prob` 全部有限且在 [0, 1] 内；
+  - 集成成员数为 5。
+- 登记时不计算任何 OOS 指标。OOS 结果在 C4 冻结分析协议之后才计算（C5）。
