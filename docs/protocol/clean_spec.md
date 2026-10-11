@@ -462,6 +462,10 @@ E1 原先按行位置比对；截断点之后才发生的代码变更会让截�
 
 E2G、E3/E4/E5（含 T 版本）、E6A、E0 registry/主表脚本的默认输入，仍是旧流程的结果目录名（如 `E2_matched_is_ind`、`E2C_temporal_1dcnn_120`）。这些目录在 clean 工作区不存在，运行时会因缺少文件报错，不会读到旧数据。这些实验在 C5 重跑时改为读取 registry v2 和 `clean_inputs`。
 
+另外：
+- E5 的 `build_forward.py`、`run_e51_horizon.py` 读取旧面板的 `Ret_5d`、`Ret_week` 两列。CSMAR 面板没有这两列，运行时会报错；C5 改为由日收益计算。
+- `E2C_temporal/train_1dcnn.py`、`eval_e2c.py` 的默认配置改为 `config_1dcnn_140.yaml`。
+
 **6. 守卫检查（`tests/test_clean_independence.py`）**
 
 - 代码：

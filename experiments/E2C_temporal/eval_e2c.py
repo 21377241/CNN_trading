@@ -161,7 +161,7 @@ def residualize_by_date(df: pd.DataFrame, ycol: str, xcol: str, outcol: str) -> 
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', default=os.path.join(os.path.dirname(__file__), 'config_1dcnn_120.yaml'))
+    parser.add_argument('--config', default=os.path.join(os.path.dirname(__file__), 'config_1dcnn_140.yaml'))
     args = parser.parse_args(argv)
     cfg = load_config(args.config)
     out_root = os.path.join(PROJECT_ROOT, cfg['paths']['out_root'].replace('/', os.sep))

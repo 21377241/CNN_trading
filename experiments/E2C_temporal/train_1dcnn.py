@@ -264,7 +264,7 @@ def predict_oos_seed(cfg: dict, seed: int, X_oos: np.ndarray, meta_oos: pd.DataF
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', default=os.path.join(os.path.dirname(__file__), 'config_1dcnn_120.yaml'))
+    parser.add_argument('--config', default=os.path.join(os.path.dirname(__file__), 'config_1dcnn_140.yaml'))
     parser.add_argument('--seeds', default='', help='optional comma-separated seeds overriding config')
     parser.add_argument('--predict-only', action='store_true')
     args = parser.parse_args(argv)
