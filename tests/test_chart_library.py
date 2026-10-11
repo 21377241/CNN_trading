@@ -119,7 +119,7 @@ def test_features_140_match_image_coordinates():
     x = features_140(p)[0]
     assert x.shape == (20, 7)
     assert np.allclose(x[[0, 10], 6], 0) and np.allclose(x[[0, 10], 5], 0)
-    assert np.allclose(x[0, :4], x[1, 3]) and np.allclose(x[10, :4], x[9, 3])
+    assert np.allclose(x[0, :5], x[1, 3]) and np.allclose(x[10, :5], x[9, 3])
     ok = p['valid'][0]
     assert np.isclose(x[ok, 1].max(), 1) and np.isclose(x[ok, 2].min(), 0)
     assert np.isclose(x[ok, 5].max(), 1)

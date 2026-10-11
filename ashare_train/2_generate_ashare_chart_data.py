@@ -62,7 +62,7 @@ def feature_dir() -> str:
     return os.path.join(CLEAN_INPUTS_DIR, 'features140')
 
 
-def process_year(grid, u: pd.DataFrame, year: int, force: bool) -> dict:
+def process_year(grid, u: pd.DataFrame, year: int, force: bool, features_only: bool = False) -> dict:
     d = image_dir()
     p_img = os.path.join(d, get_dataset_filename(WINDOW, 'week', True, [20], year, '_images.dat'))
     p_lbl = os.path.join(d, get_dataset_filename(WINDOW, 'week', True, [20], year, '_labels.feather'))
@@ -75,18 +75,20 @@ def process_year(grid, u: pd.DataFrame, year: int, force: bool) -> dict:
 
     t_idx = u['t_idx'].to_numpy()
     s_idx = grid.stock_index(meta['StockID'])
-    img_mm = np.memmap(p_img, dtype='uint8', mode='w+', shape=(n, IMG_SIZE))
+    img_mm = None if features_only else np.memmap(p_img, dtype='uint8', mode='w+', shape=(n, IMG_SIZE))
     X = np.empty((n, WINDOW, 7), dtype=np.float32)
     oor_num = 0.0
     for a in range(0, n, BATCH):
         b = min(n, a + BATCH)
         p = close0_path(gather_windows(grid, t_idx[a:b], s_idx[a:b]))
-        img_mm[a:b] = render_window_images(p).reshape(b - a, IMG_SIZE)
+        if img_mm is not None:
+            img_mm[a:b] = render_window_images(p).reshape(b - a, IMG_SIZE)
         X[a:b] = features_140(p)
         oor_num += ma_out_of_range_share(p) * p['valid'].sum()
-    img_mm.flush()
-    del img_mm
-    meta.to_feather(p_lbl)
+    if img_mm is not None:
+        img_mm.flush()
+        del img_mm
+        meta.to_feather(p_lbl)
     np.save(p_x, X)
     n_valid_days = float(meta['n_obs_in_win'].sum())
     info = {
@@ -124,6 +126,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument('--years', type=int, nargs='*', default=None)
     ap.add_argument('--force', action='store_true')
+    ap.add_argument('--features-only', action='store_true', help='只重写 140 维特征，不动图像和 labels')
     args = ap.parse_args(argv)
     years = args.years or (IS_YEARS + OOS_YEARS)
     os.makedirs(image_dir(), exist_ok=True)
@@ -137,7 +140,7 @@ def main(argv=None) -> int:
     infos = []
     for y in years:
         u = uni[uni['year'] == y].reset_index(drop=True)
-        infos.append(process_year(grid, u, y, args.force))
+        infos.append(process_year(grid, u, y, args.force or args.features_only, args.features_only))
     del grid
 
     if set(IS_YEARS + OOS_YEARS) <= set(years) or args.years is None:
