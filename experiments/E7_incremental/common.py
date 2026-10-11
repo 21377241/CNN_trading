@@ -149,6 +149,17 @@ def limit_pct(stock: pd.Series, date: pd.Series, is_st=None, age=None, first_tra
     return lim
 
 
+def hit_limit(ret, lim, side: str = 'up') -> np.ndarray:
+    """收益落在 [限制幅度 − 容差, 限制幅度 + 容差] 内视为触及涨（跌）停；超出限制幅度说明当天不受该限制，不算。
+    lim 为 NaN（无涨跌幅限制）时恒为 False。"""
+    r = np.asarray(ret, dtype=np.float64)
+    lim = np.asarray(lim, dtype=np.float64)
+    if side == 'dn':
+        r = -r
+    with np.errstate(invalid='ignore'):
+        return (r >= lim - LIMIT_TOL) & (r <= lim + LIMIT_TOL)
+
+
 def cs_rank(df: pd.DataFrame, cols: list[str], by: str = 'ending_date') -> pd.DataFrame:
     """Cross-sectional rank mapped linearly to [-0.5, 0.5]; NaN stays NaN."""
     g = df.groupby(by, sort=False)[cols]

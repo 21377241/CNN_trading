@@ -18,7 +18,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from experiments.E7_incremental.common import (  # noqa: E402
-    CTRL_A, CTRL_B, EXT_PANEL, LIMIT_TOL, OUT, OUT_DATA, STOCK_INFO, WEEKLY_CONTROLS, limit_pct,
+    CTRL_A, CTRL_B, EXT_PANEL, OUT, OUT_DATA, STOCK_INFO, WEEKLY_CONTROLS, hit_limit, limit_pct,
 )
 from Misc.config import ASHARE_UNIVERSE_PATH  # noqa: E402
 from Data.clean_window import WINDOW, _ffill_rows  # noqa: E402
@@ -157,8 +157,8 @@ def main() -> int:
     first_trade = pd.Series(dates[first_idx], index=stocks)
     lim = limit_pct(out['StockID'], out['ending_date'], is_st=out['is_ST'], age=age,
                     first_trade=out['StockID'].map(first_trade), data_start=dates[0])
-    out['limit_up_sig'] = out['ret_1d'] >= lim - LIMIT_TOL
-    out['limit_dn_sig'] = out['ret_1d'] <= -(lim - LIMIT_TOL)
+    out['limit_up_sig'] = hit_limit(out['ret_1d'], lim, 'up')
+    out['limit_dn_sig'] = hit_limit(out['ret_1d'], lim, 'dn')
     out['n_hist'] = age + 1
 
     info = pd.read_feather(STOCK_INFO, columns=['StockID', 'industry', 'list_date'])
