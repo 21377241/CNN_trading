@@ -1,0 +1,11 @@
+* text=auto eol=lf
+*.pth.tar binary
+*.png binary
+*.jpg binary
+*.pdf binary
+*.xlsx binary
+*.zip binary
+*.feather binary
+*.parquet binary
+*.npy binary
+*.dat binary
