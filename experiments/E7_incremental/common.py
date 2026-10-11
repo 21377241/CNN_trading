@@ -21,11 +21,8 @@ from experiments.common.metrics import annualized_sharpe, newey_west_t  # noqa: 
 _PKG = PROJECT_ROOT / 'trend_submit' / 'trend_code_submit'
 if str(_PKG) not in sys.path:
     sys.path.insert(0, str(_PKG))
-from Misc.config import (  # noqa: E402
-    ASHARE_PANEL_PATH, ASHARE_PROCESSED_DATA_DIR, ASHARE_RAW_ADJ_DIR, ASHARE_STOCK_INFO_PATH,
-)
+from Misc.config import ASHARE_PANEL_PATH, ASHARE_PROCESSED_DATA_DIR, ASHARE_STOCK_INFO_PATH  # noqa: E402
 
-RAW_DIR = Path(ASHARE_RAW_ADJ_DIR)
 DATA = Path(ASHARE_PROCESSED_DATA_DIR)
 EXT_PANEL = Path(ASHARE_PANEL_PATH)
 STOCK_INFO = Path(ASHARE_STOCK_INFO_PATH)
@@ -149,8 +146,8 @@ def limit_pct(stock: pd.Series, date: pd.Series, is_st=None, age=None, first_tra
     return lim
 
 
-def hit_limit(ret, lim, side: str = 'up') -> np.ndarray:
-    """收益落在 [限制幅度 − 容差, 限制幅度 + 容差] 内视为触及涨（跌）停；超出限制幅度说明当天不受该限制，不算。
+def hit_limit_band(ret, lim, side: str = 'up') -> np.ndarray:
+    """旧区间规则（只用于与 limit_state 对账）：收益落在 [限制幅度 − 容差, 限制幅度 + 容差] 内视为触及涨（跌）停。
     lim 为 NaN（无涨跌幅限制）时恒为 False。"""
     r = np.asarray(ret, dtype=np.float64)
     lim = np.asarray(lim, dtype=np.float64)
@@ -158,6 +155,67 @@ def hit_limit(ret, lim, side: str = 'up') -> np.ndarray:
         r = -r
     with np.errstate(invalid='ignore'):
         return (r >= lim - LIMIT_TOL) & (r <= lim + LIMIT_TOL)
+
+
+PRICE_TOL = 0.005
+EX_FACTOR_TOL = 1e-4
+EX_PRECLOSE_TOL = 0.005
+
+
+def _round_cent(x: np.ndarray) -> np.ndarray:
+    return np.floor(x * 100 + 0.5 + 1e-9) / 100
+
+
+def limit_state(p: pd.DataFrame) -> pd.DataFrame:
+    """涨跌停状态（clean_spec 第 9 节“数据源更换为 CSMAR”第 3 条），以原始价格精确到分判定。
+
+    p 须为面板中各股票的完整、连续交易行（不可先按日期或 universe 子集过滤），按 (StockID, Date) 排序，含列
+    StockID, Open, High, Low, Close, Close_raw, adj_factor, PreClose, LimitUp, LimitDown。
+    除权日 = 复权因子相对前一交易行变化 > 1e-4，或 PreClose 与前一交易行收盘相差 > 0.005 元。
+    除权日若 |PreClose / ref − 1| > 0.5%（ref = 前收 / 因子变化倍数），按 ref 与限价幅度重算限价，否则用 CSMAR 限价。
+    返回与 p 同索引：up_price, dn_price, limit_src（0 无限价 / 1 CSMAR / 2 重算）, no_limit,
+    close_up, close_dn（收盘在涨/跌停价）, touch_up, touch_dn（最高/最低价触及）, one_price_up, one_price_dn（开高低收都在限价）。
+    """
+    s = p['StockID']
+    sid = s.cat.codes.to_numpy() if isinstance(s.dtype, pd.CategoricalDtype) else pd.factorize(s)[0]
+    new_stock = np.r_[True, sid[1:] != sid[:-1]]
+    if new_stock.sum() != len(np.unique(sid)):
+        raise ValueError('limit_state: rows of a stock must be contiguous (sort by StockID, Date)')
+    d = p['Date'].to_numpy()
+    if (~new_stock[1:] & (d[1:] <= d[:-1])).any():
+        raise ValueError('limit_state: dates not strictly increasing within a stock')
+    f = p['adj_factor'].to_numpy(np.float64)
+    c = p['Close_raw'].to_numpy(np.float64)
+    o, h, lo = (p[k].to_numpy(np.float64) / f for k in ('Open', 'High', 'Low'))
+    pre = p['PreClose'].to_numpy(np.float64)
+    up = p['LimitUp'].to_numpy(np.float64).copy()
+    dn = p['LimitDown'].to_numpy(np.float64).copy()
+
+    prev_c = np.r_[np.nan, c[:-1]]
+    jump = np.r_[np.nan, f[1:] / f[:-1]]
+    prev_c[new_stock] = np.nan
+    jump[new_stock] = np.nan
+    with np.errstate(invalid='ignore'):
+        ex = (np.abs(jump - 1) > EX_FACTOR_TOL) | (np.abs(pre - prev_c) > EX_PRECLOSE_TOL)
+        ref = prev_c / jump
+        stale = ex & (np.abs(pre / ref - 1) > 0.005) & np.isfinite(up)
+        pct_up = np.round(up / pre - 1, 2)
+        pct_dn = np.round(1 - dn / pre, 2)
+    up[stale] = _round_cent(ref[stale] * (1 + pct_up[stale]))
+    dn[stale] = _round_cent(ref[stale] * (1 - pct_dn[stale]))
+
+    has = np.isfinite(up) & np.isfinite(dn)
+    src = np.where(has, np.where(stale, 2, 1), 0).astype(np.int8)
+    with np.errstate(invalid='ignore'):
+        at = lambda x, lim: np.abs(x - lim) <= PRICE_TOL  # noqa: E731
+        out = pd.DataFrame({
+            'up_price': up, 'dn_price': dn, 'limit_src': src, 'no_limit': ~has,
+            'close_up': has & at(c, up), 'close_dn': has & at(c, dn),
+            'touch_up': has & (h >= up - PRICE_TOL), 'touch_dn': has & (lo <= dn + PRICE_TOL),
+        }, index=p.index)
+        out['one_price_up'] = out['close_up'] & at(o, up) & at(h, up) & at(lo, up)
+        out['one_price_dn'] = out['close_dn'] & at(o, dn) & at(h, dn) & at(lo, dn)
+    return out
 
 
 def cs_rank(df: pd.DataFrame, cols: list[str], by: str = 'ending_date') -> pd.DataFrame:
