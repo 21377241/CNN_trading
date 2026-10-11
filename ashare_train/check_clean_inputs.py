@@ -2,8 +2,9 @@
 """
 check_clean_inputs.py - 干净版本数据与输入的验收（plan 阶段 2、3）
 
-  A. 回归：对既无裁剪日、也不跨 ST/停牌缺口的窗口，新 Close₀ 路径与旧工作区 adjust_price 逐位一致；
-     新面板 Close/Close₀ 与 cumprod(1+Ret) 一致（收益未裁剪）
+  A0. 样本键：不调用 build_universe，用稠密网格独立重算 universe（键集合、n_obs_in_win、ret_label、is_bj）
+  A. 特征：抽样 4 万行，直接由面板行（按窗口 20 个市场日合并）独立重算 140 维特征，与 X_is / X_oos 比对；
+     另报告收盘价路径与旧数据商面板的差异（换了数据源，只报告）
   B. 样本键：universe = 图像 labels（逐年拼接）= 特征 meta（行序相同）
   C. 像素一致：由 140 维特征推出的开/收盘刻度行、高低竖线、成交量柱高与图像像素一致
   D. 持有期内被标为 ST 的股票-周出现在 OOS universe 中且有标签
@@ -28,10 +29,10 @@ for p in (PROJECT_ROOT, CODE_PKG):
         sys.path.insert(0, p)
 
 from Misc.config import (  # noqa: E402
-    ASHARE_COUNTRY, ASHARE_PANEL_PATH, ASHARE_STOCKS_SAVEPATH, ASHARE_UNIVERSE_PATH, CLEAN_INPUTS_DIR,
+    ASHARE_COUNTRY, ASHARE_PANEL_PATH, ASHARE_STOCK_INFO_PATH, ASHARE_STOCKS_SAVEPATH, ASHARE_UNIVERSE_PATH, CLEAN_INPUTS_DIR,
     PRE_CLEAN_WORK_DIR,
 )
-from Data.clean_window import close0_path, gather_windows, load_grid  # noqa: E402
+from Data.clean_window import FEATURE_NAMES, load_grid  # noqa: E402
 from Data.dgp_config import get_dataset_dir, get_dataset_filename  # noqa: E402
 from Data.ohlc_render import layout  # noqa: E402
 
@@ -42,53 +43,130 @@ OLD_IMG_DIR = os.path.join(PRE_CLEAN_WORK_DIR, 'data', 'ashare_stocks_dataset', 
 M0_PRED = os.path.join(PRE_CLEAN_WORK_DIR, 'paper', 'E2_matched_is_ind_chrono_ric', 'preds', 'pred_cnn_oos.csv')
 NEW_IMG_DIR = get_dataset_dir(ASHARE_COUNTRY, base_savepath=os.path.join(ASHARE_STOCKS_SAVEPATH, 'I20R5_clean'))
 LAY = layout(20)
-YEARS = list(range(2000, 2026))
+YEARS = list(range(2000, 2027))
 
 
 def fn(year, suffix):
     return get_dataset_filename(20, 'week', True, [20], year, suffix)
 
 
-def old_adjust_price(o, h, l, c, r):
-    ca = np.ones_like(c)
-    ca[:, 1:] = np.cumprod(1.0 + np.nan_to_num(r[:, 1:]), axis=1)
-    ratio = np.where(np.abs(c) > 1e-10, ca / c, 1.0)
-    o2, h2, l2 = o * ratio, h * ratio, l * ratio
-    return o2, np.maximum(np.maximum(h2, o2), ca), np.minimum(np.minimum(l2, o2), ca), ca
-
-
-def check_regression(grid, uni, n_sample=60_000, seed=0) -> dict:
-    rng = np.random.default_rng(seed)
-    s = uni.iloc[np.sort(rng.choice(len(uni), n_sample, replace=False))].reset_index(drop=True)
-    old = pd.read_feather(OLD_PANEL, columns=['Date', 'StockID', 'Open', 'High', 'Low', 'Close', 'Ret'])
-    old['StockID'] = old['StockID'].astype(str).str.zfill(6)
-    old = old.sort_values(['StockID', 'Date']).reset_index(drop=True)
-    sid_codes = {k: i for i, k in enumerate(grid.stocks)}
-    oc = old['StockID'].map(sid_codes).to_numpy()
-    od = grid.dates.get_indexer(old['Date'])
-    okey = oc.astype(np.int64) * 100_000 + od
-    skey = grid.stock_index(s['StockID']).astype(np.int64) * 100_000 + s['t_idx'].to_numpy()
-    pos = np.searchsorted(okey, skey, side='right') - 1
-    has_t = (pos >= 19) & (okey[np.maximum(pos, 0)] == skey)
-    rows = pos[:, None] + np.arange(-19, 1)[None, :]
-    rows = np.where(has_t[:, None], rows, 0)
-    contiguous = has_t & (okey[rows[:, 0]] == skey - 19)
-    newp = close0_path(gather_windows(grid, s['t_idx'].to_numpy(), grid.stock_index(s['StockID'])))
-    full = newp['valid'].all(axis=1)
-    o, h, l, c, r = (old[k].to_numpy()[rows] for k in ('Open', 'High', 'Low', 'Close', 'Ret'))
-    r_true = np.full_like(r, np.nan)
-    r_true[:, 1:] = c[:, 1:] / c[:, :-1] - 1
-    unclipped = np.all(np.abs(r[:, 1:] - r_true[:, 1:]) < 1e-9, axis=1)
-    elig = contiguous & full & unclipped
-    oo, oh, ol, ocl = old_adjust_price(o[elig], h[elig], l[elig], c[elig], r[elig])
-    diffs = {k: float(np.nanmax(np.abs(a - newp[k][elig]))) for k, a in
-             (('O', oo), ('H', oh), ('L', ol), ('C', ocl))}
-    new_ret_cum = np.cumprod(np.c_[np.ones(full.sum()), newp['C'][full][:, 1:] / newp['C'][full][:, :-1]], axis=1)
+def check_universe_independent(uni) -> dict:
+    """Recompute the universe from the panel with a dense (market day x stock) grid instead of build_universe's
+    sorted-key search: signal dates, the five sample conditions, n_obs_in_win and ret_label. Delisting consolidation
+    is folded into the ST grid: for stocks whose name contains 退, the trading days after the last untraded market
+    day before the final trade, if at most 30."""
+    p = pd.read_feather(ASHARE_PANEL_PATH, columns=['Date', 'StockID', 'Close', 'is_ST', 'Vol_raw', 'Markettype'])
+    cal = pd.DatetimeIndex(np.sort(p['Date'].unique()))
+    stocks = pd.Index(p['StockID'].astype(str).unique()).sort_values()
+    di, si = cal.get_indexer(p['Date']), stocks.get_indexer(p['StockID'].astype(str))
+    shape = (len(cal), len(stocks))
+    C = np.full(shape, np.nan)
+    C[di, si] = p['Close'].to_numpy()
+    st = np.zeros(shape, dtype=bool)
+    st[di, si] = p['is_ST'].to_numpy() == 1
+    zero = np.zeros(shape, dtype=bool)
+    zero[di, si] = p['Vol_raw'].to_numpy() <= 0
+    mt = np.zeros(shape, dtype=np.int8)
+    mt[di, si] = p['Markettype'].to_numpy()
+    del p
+    traded = np.isfinite(C)
+    first = np.where(traded.any(axis=0), traded.argmax(axis=0), len(cal))
+    info = pd.read_feather(ASHARE_STOCK_INFO_PATH, columns=['StockID', 'name'])
+    tui = set(info.loc[info['name'].fillna('').str.contains('退'), 'StockID'].astype(str))
+    for j in np.flatnonzero(stocks.isin(tui)):
+        col = traded[:, j]
+        last = len(col) - 1 - col[::-1].argmax()
+        gaps = np.flatnonzero(~col[:last + 1])
+        start = gaps[-1] + 1 if len(gaps) else 0
+        if last - start + 1 <= 30:
+            st[start:last + 1, j] = True
+    iso = cal.isocalendar()
+    wk = (iso['year'] * 100 + iso['week']).to_numpy()
+    sig = np.flatnonzero(np.r_[wk[1:] != wk[:-1], True])
+    ctr = np.vstack([np.zeros((1, len(stocks)), dtype=np.int32), np.cumsum(traded, axis=0, dtype=np.int32)])
+    cz = np.vstack([np.zeros((1, len(stocks)), dtype=np.int32), np.cumsum(zero, axis=0, dtype=np.int32)])
+    rows = []
+    for j, t in enumerate(sig[:-1]):
+        y = cal[t].year
+        if y < 2000:
+            continue
+        lo = max(t - 19, 0)
+        n_obs = ctr[t + 1] - ctr[lo]
+        nz = cz[t + 1] - cz[lo]
+        ok = traded[t] & (C[t] > 0) & ~st[t] & (first <= t - 39) & (nz == 0)
+        s_idx = np.flatnonzero(ok)
+        nxt = sig[j + 1]
+        rows.append(pd.DataFrame({'StockID': stocks[s_idx], 'ending_date': cal[t], 'n_obs_in_win': n_obs[s_idx],
+                                  'ret_label': C[nxt, s_idx] / C[t, s_idx] - 1, 'mt': mt[t, s_idx]}))
+    ind = pd.concat(rows, ignore_index=True)
+    u = uni[['StockID', 'ending_date', 'n_obs_in_win', 'ret_label', 'is_bj']].astype({'StockID': str})
+    mg = u.merge(ind, on=['StockID', 'ending_date'], how='outer', indicator=True, suffixes=('', '_ind'))
+    both = mg['_merge'] == 'both'
+    lab_eq = np.isclose(mg.loc[both, 'ret_label'], mg.loc[both, 'ret_label_ind'], rtol=0, atol=1e-12, equal_nan=True)
     return {
-        'n_sample': n_sample, 'old_row_on_t': int(has_t.sum()), 'old_window_contiguous_market_days': int(contiguous.sum()),
-        'eligible_clean_windows': int(elig.sum()), 'max_abs_diff_close0_path': diffs,
-        'cumprod_ret_vs_close_ratio_max_abs_diff': float(np.abs(new_ret_cum - newp['C'][full]).max()),
+        'universe_rows': len(u), 'independent_rows': len(ind),
+        'only_universe': int((mg['_merge'] == 'left_only').sum()), 'only_independent': int((mg['_merge'] == 'right_only').sum()),
+        'n_obs_equal_share': float((mg.loc[both, 'n_obs_in_win'] == mg.loc[both, 'n_obs_in_win_ind']).mean()),
+        'ret_label_equal_share': float(lab_eq.mean()),
+        'is_bj_equal_markettype_64_share': float(((mg.loc[both, 'is_bj'] == 1) == (mg.loc[both, 'mt'] == 64)).mean()),
     }
+
+
+def check_features_independent(uni, n_sample=40_000, seed=0) -> dict:
+    """Recompute the 140 features of sampled universe rows directly from panel rows (pandas merge on the 20 market
+    days of the window), then compare with X_is / X_oos. Also report how far the Close path is from the pre-clean
+    vendor panel (not a pass criterion: different data source)."""
+    rng = np.random.default_rng(seed)
+    uni = uni.reset_index(drop=True)
+    is_rows = np.flatnonzero(uni['year'].to_numpy() < 2008)
+    pick = np.sort(rng.choice(len(uni), n_sample, replace=False))
+    s = uni.iloc[pick][['StockID', 'ending_date', 't_idx']].astype({'StockID': str}).reset_index(drop=True)
+    p = pd.read_feather(ASHARE_PANEL_PATH, columns=['Date', 'StockID', 'Open', 'High', 'Low', 'Close', 'MA20', 'Vol'])
+    p['StockID'] = p['StockID'].astype(str)
+    cal = pd.DatetimeIndex(np.sort(p['Date'].unique()))
+    win = s.loc[s.index.repeat(20)].reset_index(names='k')
+    win['pos'] = np.tile(np.arange(20), len(s))
+    win['Date'] = cal[win['t_idx'].to_numpy() - 19 + win['pos'].to_numpy()]
+    win = win.merge(p, on=['StockID', 'Date'], how='left')
+    del p
+    win = win.sort_values(['k', 'pos'])
+    a = {c: win[c].to_numpy().reshape(len(s), 20) for c in ('Open', 'High', 'Low', 'Close', 'MA20', 'Vol')}
+    valid = np.isfinite(a['Close'])
+    c0 = np.array([row[v][0] for row, v in zip(a['Close'], valid)])[:, None]
+    O, H, L, Cc, MA = (a[c] / c0 for c in ('Open', 'High', 'Low', 'Close', 'MA20'))
+    H, L = np.fmax(H, np.fmax(O, Cc)), np.fmin(L, np.fmin(O, Cc))
+    lo = np.where(valid, np.fmin(L, O), np.inf).min(axis=1, keepdims=True)
+    hi = np.where(valid, np.fmax(H, O), -np.inf).max(axis=1, keepdims=True)
+    flat = (hi - lo) < 1e-10
+    rng_ = np.maximum(hi - lo, 1e-10)
+    n = lambda x: (x - lo) / rng_  # noqa: E731
+    Cn = pd.DataFrame(np.where(valid, n(Cc), np.nan)).T.ffill().bfill().T.to_numpy()
+    exp = np.stack([np.where(valid, n(O), Cn), np.where(valid, n(H), Cn), np.where(valid, n(L), Cn), Cn,
+                    np.where(valid & np.isfinite(MA) & ~flat, n(MA), Cn),
+                    np.where(valid, a['Vol'], 0) / np.nanmax(np.where(valid, a['Vol'], np.nan), axis=1, keepdims=True),
+                    valid.astype(float)], axis=2)
+    fd = os.path.join(CLEAN_INPUTS_DIR, 'features140')
+    X_is = np.load(os.path.join(fd, 'X_is.npy'), mmap_mode='r')
+    X_oos = np.load(os.path.join(fd, 'X_oos.npy'), mmap_mode='r')
+    n_is = len(is_rows)
+    got = np.stack([np.asarray(X_is[i] if i < n_is else X_oos[i - n_is]) for i in pick]).reshape(len(s), 20, 7)
+    d = np.abs(got.astype(np.float64) - exp)
+    scale = np.maximum(1.0, np.abs(exp))
+    out = {'n_sample': n_sample, 'max_abs_diff_by_channel': dict(zip(FEATURE_NAMES, d.max(axis=(0, 1)).round(8).tolist())),
+           'share_within_float32_tol': float((d <= 1e-6 * scale).mean()),
+           'max_abs_value_by_channel': dict(zip(FEATURE_NAMES, np.abs(exp).max(axis=(0, 1)).round(4).tolist())),
+           'flat_range_windows': int(flat.sum())}
+
+    if os.path.exists(OLD_PANEL):
+        old = pd.read_feather(OLD_PANEL, columns=['Date', 'StockID', 'Close'])
+        old['StockID'] = old['StockID'].astype(str).str.zfill(6)
+        w2 = win[['k', 'pos', 'StockID', 'Date']].merge(old, on=['StockID', 'Date'], how='left').sort_values(['k', 'pos'])
+        oc = w2['Close'].to_numpy().reshape(len(s), 20)
+        full = valid.all(axis=1) & np.isfinite(oc).all(axis=1)
+        dev = np.abs(oc[full] / oc[full][:, :1] - Cc[full]).max(axis=1)
+        out['vs_pre_clean_vendor_close_path'] = {'windows': int(full.sum()), 'share_max_dev_lt_1e-3': float((dev < 1e-3).mean()),
+                                                 'median_max_dev': float(np.median(dev))}
+    return out
 
 
 def check_keys(uni) -> dict:
@@ -228,10 +306,12 @@ def main() -> int:
     matplotlib.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'DejaVu Sans']
     os.makedirs(OUT_DIR, exist_ok=True)
     uni = pd.read_feather(ASHARE_UNIVERSE_PATH)
-    grid = load_grid(ASHARE_PANEL_PATH)
     res = {}
-    res['A_regression'] = check_regression(grid, uni)
-    print(json.dumps(res['A_regression'], indent=2))
+    res['A0_universe_independent'] = check_universe_independent(uni)
+    print(json.dumps(res['A0_universe_independent'], indent=2))
+    res['A_features_independent'] = check_features_independent(uni)
+    print(json.dumps(res['A_features_independent'], indent=2))
+    grid = load_grid(ASHARE_PANEL_PATH)
     res['B_keys'] = check_keys(uni)
     print(json.dumps(res['B_keys'], indent=2))
     res['C_pixels'] = check_pixels()

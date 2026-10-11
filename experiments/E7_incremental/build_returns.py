@@ -5,8 +5,9 @@ ret_oo : Open(t+1) -> Open(first trading day after the next signal date T)
 ret_cc : Close(t)  -> Close(T)
 Exit on a suspended day is deferred to the stock's next trading day (at most MAX_DEFER market days); beyond that the
 last available close is used (`*_stale`). For ret_oo a one-price limit-down day also blocks the exit (E9 protocol 3.2;
-`oo_exit_lock_dn`). Limit hits use common.hit_limit (return within the limit band). A stock with no trade after the holding period, ending before the data end,
-is treated as delisted at its last close (`delisted`; `*_d50` versions apply a -50% delisting return).
+`oo_exit_lock_dn`). One-price limit days come from common.limit_state (raw prices at the limit price, to the cent).
+A stock with no trade after the holding period, ending before the data end, is treated as delisted at its last close
+(`delisted`; `*_d50` versions apply a -50% delisting return).
 """
 from __future__ import annotations
 
@@ -20,11 +21,11 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from experiments.E7_incremental.common import (  # noqa: E402
-    EXT_PANEL, KEYS, LIMIT_TOL, OUT, OUT_DATA, WEEKLY_RETURNS, hit_limit, limit_pct, load_canonical_preds, week_ends,
+    EXT_PANEL, KEYS, OUT, OUT_DATA, WEEKLY_RETURNS, limit_state, week_ends,
 )
+from Misc.config import ASHARE_UNIVERSE_PATH  # noqa: E402
 
 MAX_DEFER = 20
-CLIP = 0.11
 
 
 def exit_price(key, code, d, px_exit, px_close, sig_rows, target, n_days, last_idx_of_code, can_exit=None):
@@ -61,7 +62,8 @@ def exit_price(key, code, d, px_exit, px_close, sig_rows, target, n_days, last_i
 
 def main() -> int:
     t0 = time.time()
-    p = pd.read_feather(EXT_PANEL, columns=['Date', 'StockID', 'Open', 'High', 'Low', 'Close', 'is_ST', 'is_limit_up'])
+    p = pd.read_feather(EXT_PANEL, columns=['Date', 'StockID', 'Open', 'High', 'Low', 'Close', 'Close_raw', 'adj_factor',
+                                            'PreClose', 'LimitUp', 'LimitDown', 'LimitStatus'])
     cal = pd.DatetimeIndex(np.sort(p['Date'].unique()))
     n_days = len(cal)
     we = week_ends(cal)
@@ -84,35 +86,19 @@ def main() -> int:
     T = next_we[d[sig]]
     out = pd.DataFrame({'StockID': p['StockID'].to_numpy()[sig], 'ending_date': cal[d[sig]], 'next_signal': cal[T]})
 
-    # daily limit state of every panel row (return vs the previous trading day's close)
-    same = np.r_[False, code[1:] == code[:-1]]
-    r1 = np.full(N, np.nan)
-    r1[same] = C[1:][same[1:]] / C[:-1][same[1:]] - 1
-    pos = pd.Series(code).groupby(code).cumcount().to_numpy()
-    first_trade = cal[pd.Series(d).groupby(code).transform('min').to_numpy()]
-    lim_all = limit_pct(p['StockID'].astype(str).to_numpy(), cal[d], is_st=p['is_ST'].to_numpy(), age=pos,
-                        first_trade=first_trade, data_start=cal[0])
-    one_price_all = (O == H) & (H == L) & (L == C)
-    lock_up_all = one_price_all & hit_limit(r1, lim_all, 'up')
-    lock_dn_all = one_price_all & hit_limit(r1, lim_all, 'dn')
-    up_close = hit_limit(r1, lim_all, 'up')
-    raw_up = p['is_limit_up'].to_numpy() == 1
-    has_r = np.isfinite(r1)
+    # daily limit state of every panel row
+    ls = limit_state(p)
+    lock_up_all = ls['one_price_up'].to_numpy()
+    lock_dn_all = ls['one_price_dn'].to_numpy()
+    status = p['LimitStatus'].to_numpy()
+    has_lim = ~ls['no_limit'].to_numpy()
     limit_check = {
-        'rows_with_prev_close': int(has_r.sum()),
-        'agreement': float((up_close[has_r] == raw_up[has_r]).mean()),
-        'computed_up_raw_up': int((up_close & raw_up).sum()),
-        'computed_up_raw_not': int((up_close & ~raw_up).sum()),
-        'computed_up_raw_not_by_limit': {str(k): int(v) for k, v in
-                                         pd.Series(lim_all[up_close & ~raw_up]).value_counts().items()},
-        'computed_up_raw_up_by_limit': {str(k): int(v) for k, v in
-                                        pd.Series(lim_all[up_close & raw_up]).value_counts().items()},
-        'computed_not_raw_up': int((~up_close & raw_up & has_r).sum()),
-        'raw_up_without_prev_close': int((raw_up & ~has_r).sum()),
-        'raw_up_ret_above_band': int((raw_up & has_r & (r1 > lim_all + LIMIT_TOL)).sum()),
-        'raw_up_no_limit_day': int((raw_up & has_r & np.isnan(lim_all)).sum()),
+        'rows_with_limit_price': int(has_lim.sum()),
+        'close_up_vs_LimitStatus_1_agreement': float((ls['close_up'].to_numpy() == (status == 1))[has_lim].mean()),
+        'close_dn_vs_LimitStatus_-1_agreement': float((ls['close_dn'].to_numpy() == (status == -1))[has_lim].mean()),
         'one_price_lock_up_rows': int(lock_up_all.sum()), 'one_price_lock_dn_rows': int(lock_dn_all.sum()),
     }
+    del ls, status
     print('limit check:', json.dumps(limit_check), flush=True)
 
     # close-to-close
@@ -136,14 +122,6 @@ def main() -> int:
     out['ret_cc_d50'] = np.where(out['delisted'], (1 + out['ret_cc']) * 0.5 - 1, out['ret_cc'])
     out['ret_oo_d50'] = np.where(out['delisted_oo'], (1 + out['ret_oo']) * 0.5 - 1, out['ret_oo'])
 
-    # clipped close-to-close on the same exit day, for reconciliation with the original label
-    r = np.nan_to_num(r1, nan=0.0)
-    cum = np.cumsum(np.log1p(np.clip(r, -CLIP, CLIP)))
-    jT = np.searchsorted(key, code[sig] * np.int64(n_days + 100) + T)
-    jT = np.minimum(jT, N - 1)
-    exact = (code[jT] == code[sig]) & (d[jT] == T)
-    out['ret_cc_clip_exact'] = np.where(exact, np.exp(cum[jT] - cum[sig]) - 1, np.nan)
-
     OUT_DATA.mkdir(parents=True, exist_ok=True)
     out['StockID'] = out['StockID'].astype(str)
     out.reset_index(drop=True).to_feather(WEEKLY_RETURNS)
@@ -152,31 +130,34 @@ def main() -> int:
     limit_check['weekly_share_entry_lock_up'] = float(out['entry_lock_up'].mean())
     (OUT / 'limit_flag_check.json').write_text(json.dumps(limit_check, indent=2), encoding='utf-8')
 
-    # ---- validation against the canonical OOS labels ----
-    try:
-        pr = load_canonical_preds()[KEYS + ['ret_val']]
-    except (FileNotFoundError, RuntimeError) as e:
-        print(f'跳过与规范预测的对账：{e}')
-        return 0
-    m = pr.merge(out, on=KEYS, how='left')
-    ex = m['ret_cc_clip_exact'].notna()
+    # ---- validation against the universe labels (Close(T) / Close(t) - 1 when the stock trades on T) ----
+    u = pd.read_feather(ASHARE_UNIVERSE_PATH, columns=KEYS + ['split', 'ret_label', 'is_bj'])
+    u['StockID'] = u['StockID'].astype(str)
+    m = u.merge(out, on=KEYS, how='left', validate='one_to_one', indicator=True)
+    on_t = m['cc_exit_delay'] == 0
+    censored = m['ret_cc'].isna() & ~m['delisted'].astype(bool) & ~m['cc_stale'].astype(bool)
+    oos = (m['split'] == 'oos') & (m['is_bj'] == 0)
+    mo = m[oos]
     chk = {
         'weekly_rows': len(out),
-        'pred_rows': len(pr), 'pred_rows_matched': int(m['ret_cc'].notna().sum()),
-        'pred_rows_ret_oo_available': int(m['ret_oo'].notna().sum()),
-        'pred_share_not_enterable': float(m['not_enterable'].mean()),
-        'pred_share_entry_lock_up': float(m['entry_lock_up'].mean()),
-        'pred_share_oo_exit_deferred': float((m['oo_exit_delay'] > 0).mean()),
-        'pred_share_oo_exit_lock_dn': float(m['oo_exit_lock_dn'].mean()),
-        'pred_share_oo_stale': float(m['oo_stale'].mean()),
-        'pred_share_delisted_oo': float(m['delisted_oo'].mean()),
-        'clip_recompute_matches_ret_val_1e-5': float(((m.loc[ex, 'ret_cc_clip_exact'] - m.loc[ex, 'ret_val']).abs()
-                                                       < 1e-5).mean()),
-        'share_cc_exit_on_T': float(ex.mean()),
-        'ret_cc_equals_ret_val_1e-5': float(((m['ret_cc'] - m['ret_val']).abs() < 1e-5).mean()),
-        'corr_ret_oo_ret_cc': float(m[['ret_oo', 'ret_cc']].corr().iloc[0, 1]),
-        'ret_oo_quantiles': m['ret_oo'].quantile([0.001, 0.01, 0.5, 0.99, 0.999]).round(4).to_dict(),
-        'ret_cc_quantiles': m['ret_cc'].quantile([0.001, 0.01, 0.5, 0.99, 0.999]).round(4).to_dict(),
+        'universe_rows': len(u), 'universe_rows_matched': int((m['_merge'] == 'both').sum()),
+        'universe_rows_ret_cc_nan': int(m['ret_cc'].isna().sum()),
+        'ret_cc_nan_suspended_to_sample_end': int((censored & (m['next_signal'] > cal[-1 - MAX_DEFER])).sum()),
+        'universe_label_rows_exit_on_T': int((on_t & m['ret_label'].notna()).sum()),
+        'ret_cc_equals_ret_label_on_T_1e-9': float(((m.loc[on_t, 'ret_cc'] - m.loc[on_t, 'ret_label']).abs()
+                                                     < 1e-9).mean()),
+        'label_nan_but_cc_exit_on_T': int((on_t & m['ret_label'].isna()).sum()),
+        'oos_main_rows': len(mo),
+        'oos_share_ret_oo_available': float(mo['ret_oo'].notna().mean()),
+        'oos_share_not_enterable': float(mo['not_enterable'].mean()),
+        'oos_share_entry_lock_up': float(mo['entry_lock_up'].mean()),
+        'oos_share_oo_exit_deferred': float((mo['oo_exit_delay'] > 0).mean()),
+        'oos_share_oo_exit_lock_dn': float(mo['oo_exit_lock_dn'].mean()),
+        'oos_share_oo_stale': float(mo['oo_stale'].mean()),
+        'oos_share_delisted_oo': float(mo['delisted_oo'].mean()),
+        'oos_corr_ret_oo_ret_cc': float(mo[['ret_oo', 'ret_cc']].corr().iloc[0, 1]),
+        'oos_ret_oo_quantiles': mo['ret_oo'].quantile([0.001, 0.01, 0.5, 0.99, 0.999]).round(4).to_dict(),
+        'oos_ret_cc_quantiles': mo['ret_cc'].quantile([0.001, 0.01, 0.5, 0.99, 0.999]).round(4).to_dict(),
     }
     (OUT / 'weekly_returns_check.json').write_text(json.dumps(chk, indent=2, default=str), encoding='utf-8')
     print(json.dumps(chk, indent=2, default=str))

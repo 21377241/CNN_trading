@@ -7,7 +7,7 @@ import pandas as pd
 
 
 IS_YEARS = list(range(2000, 2008))
-OOS_YEARS = list(range(2008, 2026))
+OOS_YEARS = list(range(2008, 2027))
 
 
 def train_val_indices(n: int, train_frac: float = 0.7, seed: int = 42):

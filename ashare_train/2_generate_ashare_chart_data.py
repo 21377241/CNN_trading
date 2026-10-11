@@ -11,7 +11,7 @@
   {CLEAN_INPUTS_DIR}/features140/generation_check.json
 
 labels / meta 列：StockID, ending_date, ret_val, binary_label, label_raw, MarketCap, split, embargo,
-  n_obs_in_win, board, next_date, year
+  n_obs_in_win, board, is_bj, next_date, year
   binary_label：label_raw；但 ret_val 缺失（label_raw = -1）或 embargo = 1 时为 -99（训练与验证中剔除）。
   OOS 预测不按 binary_label 过滤。
 
@@ -51,7 +51,7 @@ SPEC = 'I20R5_clean'
 BATCH = 40_000
 IMG_SIZE = 64 * 60
 IS_YEARS = list(range(2000, 2008))
-OOS_YEARS = list(range(2008, 2026))
+OOS_YEARS = list(range(2008, 2027))
 
 
 def image_dir() -> str:

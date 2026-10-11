@@ -5,6 +5,10 @@ Every 20-day variable uses the same window as the model inputs: the 20 most rece
 signal date t (clean_window.gather_windows), with the same missing-day rules. Daily returns inside the window are
 ratios of consecutive valid closes within the window (a return spanning a missing day is booked on the resumption
 day, as in the image), so a fully traded window has 19 returns. Values only use information up to the close of t.
+
+bm = BE / TotalMV(t) (NaN when BE <= 0), ep = NI_TTM / TotalMV(t), sp = REV_TTM / TotalMV(t), with the fundamentals
+record available at t (build_fundamentals.pit_asof). limit_up_sig / limit_dn_sig: close of t at the limit price
+(common.limit_state).
 """
 from __future__ import annotations
 
@@ -18,13 +22,15 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from experiments.E7_incremental.common import (  # noqa: E402
-    CTRL_A, CTRL_B, EXT_PANEL, OUT, OUT_DATA, STOCK_INFO, WEEKLY_CONTROLS, hit_limit, limit_pct,
+    CTRL_A, CTRL_B, EXT_PANEL, OUT, OUT_DATA, STOCK_INFO, WEEKLY_CONTROLS, limit_state,
 )
-from Misc.config import ASHARE_UNIVERSE_PATH  # noqa: E402
+from ashare_train.build_fundamentals import pit_asof  # noqa: E402
+from Misc.config import ASHARE_FUNDAMENTALS_PATH, ASHARE_UNIVERSE_PATH  # noqa: E402
 from Data.clean_window import WINDOW, _ffill_rows  # noqa: E402
 
 PANEL_COLS = ['Date', 'StockID', 'Open', 'High', 'Low', 'Close', 'MA20', 'Vol', 'Amount', 'Turnover', 'FloatMV',
-              'PE_TTM', 'PB', 'is_ST']
+              'TotalMV', 'is_ST']
+LIMIT_COLS = ['Date', 'StockID', 'Open', 'High', 'Low', 'Close_raw', 'adj_factor', 'PreClose', 'LimitUp', 'LimitDown']
 MOM_FROM, MOM_TO = 250, 20
 MIN_RET_VOL = 5
 MIN_DAYS_LIQ = 15
@@ -36,8 +42,7 @@ def dense_grid(p: pd.DataFrame) -> tuple[pd.DatetimeIndex, pd.Index, dict]:
     di = dates.get_indexer(p['Date'])
     si = p['StockID'].cat.codes.to_numpy()
     g = {}
-    for col in ('Open', 'High', 'Low', 'Close', 'MA20', 'Vol', 'Amount', 'Turnover', 'FloatMV', 'PE_TTM', 'PB',
-                'is_ST'):
+    for col in ('Open', 'High', 'Low', 'Close', 'MA20', 'Vol', 'Amount', 'Turnover', 'FloatMV', 'TotalMV', 'is_ST'):
         dt = np.float64 if col == 'Close' else np.float32
         a = np.full((len(dates), len(stocks)), np.nan, dtype=dt)
         a[di, si] = p[col].to_numpy(dtype=dt)
@@ -116,8 +121,27 @@ def window_controls(g: dict, Cf_full: np.ndarray, M: np.ndarray, t: np.ndarray, 
     return out
 
 
+def limit_flags_at(u: pd.DataFrame) -> pd.DataFrame:
+    """limit_state on the full panel (it needs every trading row of a stock), then picked at (StockID, ending_date)."""
+    p = pd.read_feather(EXT_PANEL, columns=LIMIT_COLS)
+    ls = limit_state(p)[['close_up', 'close_dn', 'no_limit']]
+    ls['StockID'] = p['StockID'].astype(str).to_numpy()
+    ls['ending_date'] = p['Date'].to_numpy()
+    del p
+    got = u[['StockID', 'ending_date']].merge(ls, on=['StockID', 'ending_date'], how='left', validate='one_to_one')
+    if got['close_up'].isna().any():
+        raise RuntimeError('universe 行在面板中找不到')
+    return got
+
+
 def main() -> int:
     t0 = time.time()
+    u = pd.read_feather(ASHARE_UNIVERSE_PATH, columns=['StockID', 'ending_date', 't_idx', 'split', 'n_obs_in_win',
+                                                       'board', 'is_bj', 'MarketCap'])
+    u['StockID'] = u['StockID'].astype(str)
+    lim = limit_flags_at(u)
+    print(f'  limit_state {time.time() - t0:.0f}s', flush=True)
+
     p = pd.read_feather(EXT_PANEL, columns=PANEL_COLS)
     p['is_ST'] = p['is_ST'].astype(np.float64)
     dates, stocks, g = dense_grid(p)
@@ -127,9 +151,6 @@ def main() -> int:
     traded = np.isfinite(g['Close'])
     n_hist_grid = np.cumsum(traded, axis=0, dtype=np.int32)
 
-    u = pd.read_feather(ASHARE_UNIVERSE_PATH, columns=['StockID', 'ending_date', 't_idx', 'split', 'n_obs_in_win',
-                                                       'board', 'MarketCap'])
-    u['StockID'] = u['StockID'].astype(str)
     t = dates.get_indexer(pd.DatetimeIndex(u['ending_date']))
     s = stocks.get_indexer(u['StockID'])
     if (t < 0).any() or (s < 0).any() or (t != u['t_idx'].to_numpy()).any():
@@ -140,25 +161,29 @@ def main() -> int:
         b = min(a + 200_000, len(u))
         parts.append(pd.DataFrame(window_controls(g, Cf_full, M, t[a:b], s[a:b])))
         print(f'  {b:,}/{len(u):,}  {time.time() - t0:.0f}s', flush=True)
-    out = pd.concat([u[['StockID', 'ending_date', 'split', 'n_obs_in_win', 'board']].reset_index(drop=True),
+    out = pd.concat([u[['StockID', 'ending_date', 'split', 'n_obs_in_win', 'board', 'is_bj']].reset_index(drop=True),
                      pd.concat(parts, ignore_index=True)], axis=1)
 
     fmv = g['FloatMV'][t, s]
+    tmv = g['TotalMV'][t, s].astype(np.float64)
     out['size'] = np.log(np.where(fmv > 0, fmv, np.nan))
-    pb, pe = g['PB'][t, s], g['PE_TTM'][t, s]
-    with np.errstate(divide='ignore'):
-        out['bm'] = np.where(pb > 0, 1 / pb, np.nan)
-        out['ep'] = np.where(pe != 0, 1 / pe, np.nan)
+    fu = pit_asof(out, pd.read_parquet(ASHARE_FUNDAMENTALS_PATH), ['BE', 'NI_TTM', 'REV_TTM'])
+    with np.errstate(divide='ignore', invalid='ignore'):
+        mv = np.where(tmv > 0, tmv, np.nan)
+        out['bm'] = np.where(fu['BE'].to_numpy() > 0, fu['BE'].to_numpy() / mv, np.nan)
+        out['ep'] = fu['NI_TTM'].to_numpy() / mv
+        out['sp'] = fu['REV_TTM'].to_numpy() / mv
+    out['fund_accper'] = fu['Accper'].to_numpy()
     out['FloatMV'] = fmv
+    out['TotalMV'] = tmv
     out['is_ST'] = g['is_ST'][t, s] > 0
     out['ret_1d'] = r_full[t, s]
     age = n_hist_grid[t, s] - 1
     first_idx = traded.argmax(axis=0)
     first_trade = pd.Series(dates[first_idx], index=stocks)
-    lim = limit_pct(out['StockID'], out['ending_date'], is_st=out['is_ST'], age=age,
-                    first_trade=out['StockID'].map(first_trade), data_start=dates[0])
-    out['limit_up_sig'] = hit_limit(out['ret_1d'], lim, 'up')
-    out['limit_dn_sig'] = hit_limit(out['ret_1d'], lim, 'dn')
+    out['limit_up_sig'] = lim['close_up'].to_numpy(bool)
+    out['limit_dn_sig'] = lim['close_dn'].to_numpy(bool)
+    out['no_limit_sig'] = lim['no_limit'].to_numpy(bool)
     out['n_hist'] = age + 1
 
     info = pd.read_feather(STOCK_INFO, columns=['StockID', 'industry', 'list_date'])

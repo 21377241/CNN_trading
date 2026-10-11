@@ -129,6 +129,19 @@ def test_features_140_match_image_coordinates():
     assert all(rendered[pix[i], 3 * d + 2] == 255 for i, d in enumerate(days))
 
 
+def test_features_140_flat_range_window():
+    nan = np.full((1, 20), np.nan)
+    w = {k: nan.copy() for k in ('O', 'H', 'L', 'C', 'V')}
+    for k in ('O', 'H', 'L', 'C'):
+        w[k][0, -1] = 8.0
+    w['V'][0, -1] = 100.0
+    w['MA'] = np.full((1, 20), 9.0)
+    x = features_140(close0_path(w))[0]
+    assert np.isfinite(x).all() and np.abs(x).max() <= 1
+    assert np.allclose(x[:, :5], 0), '价格区间为零时价格与均线都取占位值'
+    assert x[-1, 5] == 1 and x[-1, 6] == 1 and x[:-1, 6].sum() == 0
+
+
 if __name__ == '__main__':
     fns = [v for k, v in sorted(globals().items()) if k.startswith('test_') and callable(v)]
     for fn in fns:

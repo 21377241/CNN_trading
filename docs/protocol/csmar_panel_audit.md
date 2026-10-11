@@ -1,6 +1,6 @@
 # CSMAR 面板审计结果
 
-由 `ashare_train/audit_csmar_panel.py` 生成；标准见 `clean_spec.md` 第 9 节“数据源更换为 CSMAR”第 6 条。各阶段运行时间：{'e1': '2026-10-11 19:47:41', 'ext': '2026-10-11 19:43:16', 'fund': '2026-10-11 19:37:48', 'old': '2026-10-11 19:39:15', 'raw': '2026-10-11 19:37:35'}。详细结果见 `WORK_SPACE/data/ashare_processed_data/audit/results_<phase>.json`。
+由 `ashare_train/audit_csmar_panel.py` 生成；标准见 `clean_spec.md` 第 9 节“数据源更换为 CSMAR”第 6 条。各阶段运行时间：{'e1': '2026-10-11 19:47:41', 'ext': '2026-10-11 19:43:16', 'fund': '2026-10-11 19:37:48', 'old': '2026-10-11 19:39:15', 'raw': '2026-10-11 20:45:24'}。详细结果见 `WORK_SPACE/data/ashare_processed_data/audit/results_<phase>.json`。
 
 | 编号 | 检查 | 通过标准 | 结果 | 结论 |
 |---|---|---|---|---|

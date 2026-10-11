@@ -127,6 +127,22 @@ def ttm(d: pd.DataFrame, cum_col: str) -> tuple[pd.Series, pd.Series]:
     return pd.Series(out, index=d.index), pd.Series(src, index=d.index)
 
 
+def pit_asof(keys: pd.DataFrame, fund: pd.DataFrame, cols: list[str], date_col: str = 'ending_date') -> pd.DataFrame:
+    """For each row of keys (StockID, date_col): the record with the latest avail_date <= date, ties broken by the
+    latest Accper (an annual report and the next Q1 report share the same statutory deadline). Returns cols and
+    Accper aligned to keys.index; NaN where nothing is available yet."""
+    f = fund[['StockID', 'Accper', 'avail_date'] + cols].sort_values(['StockID', 'avail_date', 'Accper'])
+    f = f.drop_duplicates(['StockID', 'avail_date'], keep='last')
+    k = pd.DataFrame({'StockID': keys['StockID'].astype(str).to_numpy(),
+                      '_d': pd.to_datetime(keys[date_col]).to_numpy(), '_i': np.arange(len(keys))})
+    m = pd.merge_asof(k.sort_values('_d'), f.assign(StockID=f['StockID'].astype(str)).sort_values('avail_date'),
+                      left_on='_d', right_on='avail_date', by='StockID', direction='backward')
+    m = m.sort_values('_i')
+    out = m[cols + ['Accper']].reset_index(drop=True)
+    out.index = keys.index
+    return out
+
+
 def main() -> int:
     chk: dict = {}
     bs = keep_consolidated_quarters(read_statement('资产负债表*.zip', 'FS_Combas.csv', BS_COLS), 'balance_sheet', chk)

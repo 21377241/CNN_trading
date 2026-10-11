@@ -23,7 +23,7 @@ WINDOW = 20
 FEATURE_NAMES = ('O', 'H', 'L', 'C', 'MA20', 'V', 'has_trade')
 PER_DAY = len(FEATURE_NAMES)
 META_COLS = ['StockID', 'ending_date', 'ret_val', 'binary_label', 'label_raw', 'MarketCap', 'split', 'embargo',
-             'n_obs_in_win', 'board', 'next_date', 'year']
+             'n_obs_in_win', 'board', 'is_bj', 'next_date', 'year']
 
 
 def universe_meta(u: pd.DataFrame) -> pd.DataFrame:
@@ -127,10 +127,12 @@ def features_140(p: dict) -> np.ndarray:
     """返回 float32 (N, 20, 7)。展平为 140 维时按天优先（reshape(N, -1)）。
 
     无交易日的 O/H/L/C/MA 都取占位收盘价、V 为 0、有交易标记为 0：图像在这些日子是空白列，
-    不能让 MA 带入窗口外（停牌前）的信息。"""
+    不能让 MA 带入窗口外（停牌前）的信息。
+    价格区间为零的窗口（hi = lo）价格轴无定义，图像也不画均线，MA 同样取占位收盘价。"""
     lo, hi, valid = price_bounds(p['O'], p['H'], p['L'], p['C'])
     rng = hi - lo
-    rng = np.where(rng < 1e-10, 1e-10, rng)
+    flat = rng < 1e-10
+    rng = np.where(flat, 1e-10, rng)
 
     def norm(a):
         return (a - lo[:, None]) / rng[:, None]
@@ -139,7 +141,7 @@ def features_140(p: dict) -> np.ndarray:
     C_fill = _ffill_rows(C)
     O, H, L = (np.where(valid, norm(p[k]), C_fill) for k in ('O', 'H', 'L'))
     MA = norm(p['MA'])
-    MA = np.where(valid & np.isfinite(MA), MA, C_fill)
+    MA = np.where(valid & np.isfinite(MA) & ~flat[:, None], MA, C_fill)
     V = np.where(valid, p['V'], 0.0)
     vmax = V.max(axis=1, keepdims=True)
     V = np.where(vmax > 1e-10, V / np.where(vmax > 1e-10, vmax, 1.0), 0.0)

@@ -33,7 +33,7 @@ WEEKLY_CONTROLS = OUT_DATA / 'weekly_controls.feather'
 
 KEYS = ['StockID', 'ending_date']
 LIMIT_TOL = 0.005
-OOS_START, OOS_END = pd.Timestamp('2008-01-01'), pd.Timestamp('2025-12-31')
+OOS_START, OOS_END = pd.Timestamp('2008-01-01'), pd.Timestamp('2026-09-30')
 
 # Protocol section 2: canonical models, files and sha1 (first 16 hex chars).
 CANONICAL = {

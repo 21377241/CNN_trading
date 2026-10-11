@@ -97,7 +97,7 @@ CSI800_OOS_YEARS = list(range(2019, 2026))  # 样本外测试年份（2019-2025�
 # 年份配置（A股全市场：类比论文前8年训练）
 # ========================
 ASHARE_IS_YEARS = list(range(2000, 2008))    # 2000-2007
-ASHARE_OOS_YEARS = list(range(2008, 2026))   # 2008-2025
+ASHARE_OOS_YEARS = list(range(2008, 2027))   # 2008-01 至 SAMPLE_END（2026-09-30）
 ASHARE_COUNTRY = 'CHN'
 ASHARE_EXP_DIR_I20 = os.path.join(WORK_DIR, 'ashare_model_res_I20R20')
 ASHARE_EXP_DIR_I5 = os.path.join(WORK_DIR, 'ashare_model_res_I5R5')

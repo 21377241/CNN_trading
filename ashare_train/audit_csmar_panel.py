@@ -79,7 +79,7 @@ SAMPLE_START = '1999-01-01'
 
 F64 = ['Opnprc', 'Hiprc', 'Loprc', 'Clsprc', 'Dnshrtrd', 'Dretwd', 'Dretnd', 'Adjprcwd', 'Adjprcnd', 'PreClosePrice',
        'LimitDown', 'LimitUp']
-F32 = ['Markettype', 'Filling', 'Trdsta', 'Dnvaltrd', 'Dsmvosd', 'Dsmvtl2', 'Dsmvtl3', 'LimitStatus']
+F32 = ['Markettype', 'Filling', 'Trdsta', 'Dnvaltrd', 'Dsmvosd', 'Dsmvtll', 'Dsmvtl2', 'Dsmvtl3', 'LimitStatus']
 RET_FIELDS = ['Dretwd', 'Dretnd', 'Adjprcwd', 'Adjprcnd', 'PreClosePrice']
 
 # 中国人民银行一年期整存整取定期存款基准利率（%），生效日
@@ -501,6 +501,7 @@ def phase_raw() -> None:
         'Open': R['Opnprc'] * f, 'High': R['Hiprc'] * f, 'Low': R['Loprc'] * f, 'Close': R['Adjprcwd'],
         'Vol': R['Dnshrtrd'] / fnd, 'Vol_raw': R['Dnshrtrd'], 'Amount': R['Dnvaltrd'], 'FloatMV': float_mv,
         'MarketCap': float_mv, 'TotalMV': R['Dsmvtl3'].astype(np.float64) * 1000.0,
+        'TotalMV_A': R['Dsmvtll'].astype(np.float64) * 1000.0,
         'FloatShares': float_mv / R['Clsprc'], 'TotalShares': R['Dsmvtl2'].astype(np.float64) * 1000.0 / R['Clsprc'],
         'Turnover': R['Dnshrtrd'] / (float_mv / R['Clsprc']), 'is_ST': np.isin(R['Trdsta'], ST_SET).astype(np.int8),
         'Ret': ret, 'Ret_nd': ret_nd, 'PreClose': R['PreClosePrice'], 'LimitUp': R['LimitUp'],
@@ -515,7 +516,7 @@ def phase_raw() -> None:
             ma[a + 19:b] = np.convolve(c_adj[a:b], np.ones(20), 'valid') / 20
     exp['MA20'] = ma
     tol = {'Turnover': 1e-6, 'Amount': 1e-6, 'FloatMV': 1e-6, 'MarketCap': 1e-6, 'TotalMV': 1e-6,
-           'FloatShares': 1e-6, 'TotalShares': 1e-6, 'LimitStatus': 0, 'Markettype': 0, 'Trdsta': 0, 'MA20': 1e-9}
+           'TotalMV_A': 1e-6, 'FloatShares': 1e-6, 'TotalShares': 1e-6, 'LimitStatus': 0, 'Markettype': 0, 'Trdsta': 0, 'MA20': 1e-9}
     pcols = feather.read_table(ASHARE_PANEL_PATH, memory_map=True).column_names
     a0 = {}
     p_rows = feather.read_table(ASHARE_PANEL_PATH, columns=['Date'], memory_map=True).num_rows

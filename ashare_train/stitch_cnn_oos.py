@@ -33,7 +33,7 @@ from Data.dgp_config import get_dataset_dir
 from Experiments.cnn_experiment import _dataset, _loader, _predict, _sample_modes, _get_device
 from Model.cnn_model import init_model, get_full_model_name
 
-OOS_YEARS = list(range(2008, 2026))
+OOS_YEARS = list(range(2008, 2027))
 KEEP = ['StockID', 'ending_date', 'ret_val', 'MarketCap', 'binary_label']
 
 

@@ -18,6 +18,7 @@
   Vol_raw, Amount               Dnshrtrd（股）、Dnvaltrd（元）
   FloatMV, MarketCap            Dsmvosd × 1000（元）；MarketCap = FloatMV
   TotalMV                       Dsmvtl3 × 1000（含 B 股、H 股的公司总市值，用于估值比率）
+  TotalMV_A                     Dsmvtll × 1000（A 股总市值，含非流通 A 股；CH 因子的规模与权重）
   FloatShares, TotalShares      FloatMV / Clsprc、Dsmvtl2 × 1000 / Clsprc
   Turnover                      Dnshrtrd / FloatShares（小数）
   is_ST                         Trdsta ∈ {2,3,5,6,8,9,11,12,14,15,16}
@@ -65,7 +66,7 @@ KEY = ['Stkcd', 'Trddt']
 
 F64 = ['Opnprc', 'Hiprc', 'Loprc', 'Clsprc', 'Dnshrtrd', 'Dretwd', 'Dretnd', 'Adjprcwd', 'Adjprcnd',
        'PreClosePrice', 'LimitDown', 'LimitUp']
-F32 = ['Dnvaltrd', 'Dsmvosd', 'Dsmvtl2', 'Dsmvtl3', 'LimitStatus']
+F32 = ['Dnvaltrd', 'Dsmvosd', 'Dsmvtll', 'Dsmvtl2', 'Dsmvtl3', 'LimitStatus']
 COL_TYPES = {'Stkcd': pa.int32(), 'Trddt': pa.date32(), 'Markettype': pa.int8(), 'Trdsta': pa.int8(),
              'Filling': pa.int8(), **{c: pa.float64() for c in F64}, **{c: pa.float32() for c in F32}}
 MA_LAG = 20
@@ -261,6 +262,7 @@ def build_panel(d: pd.DataFrame, chk: dict) -> pd.DataFrame:
     out['FloatMV'] = out.pop('Dsmvosd').astype('float64') * 1000.0
     out['MarketCap'] = out['FloatMV']
     out['TotalMV'] = out.pop('Dsmvtl3').astype('float64') * 1000.0
+    out['TotalMV_A'] = out.pop('Dsmvtll').astype('float64') * 1000.0
     out['FloatShares'] = out['FloatMV'] / out['Close_raw']
     out['TotalShares'] = out.pop('Dsmvtl2').astype('float64') * 1000.0 / out['Close_raw']
     out['Turnover'] = (out['Vol_raw'] / out['FloatShares']).astype('float32')
@@ -269,7 +271,7 @@ def build_panel(d: pd.DataFrame, chk: dict) -> pd.DataFrame:
     first = out['StockID'].ne(out['StockID'].shift(1))
     out['Ret'] = out['Ret'].mask(first)
     out['Ret_nd'] = out['Ret_nd'].mask(first)
-    for col in ['Ret', 'FloatMV', 'TotalMV', 'TotalShares']:
+    for col in ['Ret', 'FloatMV', 'TotalMV', 'TotalMV_A', 'TotalShares']:
         chk[f'missing_{col}'] = int(out[col].isna().sum()) - (int(first.sum()) if col == 'Ret' else 0)
 
     g = out.groupby('StockID', sort=False)
@@ -285,7 +287,7 @@ def build_panel(d: pd.DataFrame, chk: dict) -> pd.DataFrame:
 
 PANEL_COLS = ['Date', 'StockID', 'Open', 'High', 'Low', 'Close', 'Close_raw', 'adj_factor', 'adj_factor_nd',
               'Vol', 'Vol_raw', 'Amount', 'Turnover', 'FloatShares', 'TotalShares', 'FloatMV', 'MarketCap',
-              'TotalMV', 'is_ST', 'Ret', 'Ret_nd', 'MA20', 'EWMA_vol', 'PreClose', 'LimitUp', 'LimitDown',
+              'TotalMV', 'TotalMV_A', 'is_ST', 'Ret', 'Ret_nd', 'MA20', 'EWMA_vol', 'PreClose', 'LimitUp', 'LimitDown',
               'LimitStatus', 'Markettype', 'Trdsta']
 
 
