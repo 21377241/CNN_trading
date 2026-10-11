@@ -34,44 +34,53 @@ WEEKLY_CONTROLS = OUT_DATA / 'weekly_controls.feather'
 KEYS = ['StockID', 'ending_date']
 OOS_START, OOS_END = pd.Timestamp('2008-01-01'), pd.Timestamp('2026-09-30')
 
-# Canonical OOS predictions of the clean models (clean_spec 5.4): path relative to PROJECT_ROOT and sha1 (first 16
-# hex chars), frozen in registry v2 once training is done. Nothing is read before the registry exists.
+# Canonical OOS predictions of the clean models (clean_spec 5.4 and section 9, "C3 训练前补充"): parquet path relative to
+# PROJECT_ROOT and full sha1, frozen in registry v2 by ashare_train/build_registry_v2.py. Nothing is read before the
+# registry exists.
 REGISTRY_V2 = PROJECT_ROOT / 'WORK_SPACE' / 'paper' / 'registry_v2.json'
 SCORES = ['s_chart', 's_1d', 's_mlp4']
 CHART_S = 's_chartS'
+REGISTRY_NAMES = {'s_chart': 'chartcnn_clean', 's_1d': 'onedcnn_140', 's_mlp4': 'mlp4_140', CHART_S: 'chartcnn_s'}
+
+
+def _registry() -> dict:
+    if not REGISTRY_V2.exists():
+        raise RuntimeError(f'{REGISTRY_V2} 不存在：干净版本模型尚未训练、冻结（C3）')
+    return json.loads(REGISTRY_V2.read_text(encoding='utf-8'))['predictions']
 
 
 def registry_entry(name: str) -> tuple[Path, str]:
-    if not REGISTRY_V2.exists():
-        raise RuntimeError(f'{REGISTRY_V2} 不存在：干净版本模型尚未训练、冻结（C3）')
-    e = json.loads(REGISTRY_V2.read_text(encoding='utf-8'))['predictions'][name]
+    e = _registry()[REGISTRY_NAMES[name]]
     return PROJECT_ROOT / e['path'], e['sha1']
 
 
 def canonical_sha1() -> dict:
-    return {k: registry_entry(k)[1] for k in SCORES + [CHART_S]} if REGISTRY_V2.exists() else {}
+    if not REGISTRY_V2.exists():
+        return {}
+    reg = _registry()
+    return {k: reg[REGISTRY_NAMES[k]]['sha1'] for k in SCORES + [CHART_S] if REGISTRY_NAMES[k] in reg}
 
 CTRL_A = ['rev_1w', 'ret_20d', 'max_20d', 'vol_20d', 'vtrend', 'range_20d', 'clv_20d', 'ma_gap']
 CTRL_B = ['mom_12_1', 'size', 'turn_20d', 'illiq_20d', 'ivol_20d', 'bm', 'ep']
 CTRL_VALUATION = ['bm', 'ep']
 
 
-def sha1_16(path: Path) -> str:
+def sha1_of(path: Path) -> str:
     h = hashlib.sha1()
     with open(path, 'rb') as f:
         for block in iter(lambda: f.read(1 << 24), b''):
             h.update(block)
-    return h.hexdigest()[:16]
+    return h.hexdigest()
 
 
 def load_prediction(name: str) -> pd.DataFrame:
     """One registered OOS prediction file (KEYS, up_prob -> name); aborts if its sha1 differs from registry v2."""
     path, expected = registry_entry(name)
-    got = sha1_16(path)
+    got = sha1_of(path)
     if got != expected:
         raise RuntimeError(f'{name}: sha1 {got} != registry {expected} ({path})')
-    df = pd.read_csv(path, usecols=KEYS + ['up_prob'], dtype={'StockID': str})
-    df['StockID'] = df['StockID'].str.zfill(6)
+    df = pd.read_parquet(path, columns=KEYS + ['up_prob'])
+    df['StockID'] = df['StockID'].astype(str)
     df['ending_date'] = pd.to_datetime(df['ending_date'])
     return df.rename(columns={'up_prob': name})
 

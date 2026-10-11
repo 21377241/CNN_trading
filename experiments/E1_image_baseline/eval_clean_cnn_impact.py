@@ -49,7 +49,7 @@ M0_DIR = os.path.join(PRE_CLEAN_WORK_DIR, 'paper', 'E1b_cnn_hp_I20R5_ric', LEAF,
                       '20d5p-lr1E-4-dp0.50-maTrue-vbTrue-weekTrained-noDelayedReturn-ric-full-p5')
 M1_DIR = os.path.join(OLD_DATA_WORK_DIR, 'paper', 'E1c_cnn_M1_rendfix', LEAF,
                       '20d5p-lr1E-4-dp0.50-maTrue-vbTrue-weekTrained-noDelayedReturn-ric-full-p5')
-M2_ROOT = os.path.join(PROJECT_ROOT, 'WORK_SPACE', 'paper', 'E1c_cnn_hp_I20R5_clean')
+REGISTRY_V2 = os.path.join(PROJECT_ROOT, 'WORK_SPACE', 'paper', 'registry_v2.json')
 OUT_DIR = os.path.join(PROJECT_ROOT, 'WORK_SPACE', 'paper', 'E1c_clean_cnn_impact')
 DATASETS = {
     'M0': (get_dataset_dir(ASHARE_COUNTRY, base_savepath=os.path.join(PRE_CLEAN_WORK_DIR, 'data', 'ashare_stocks_dataset', 'I20R5')), 'legacy'),
@@ -60,12 +60,9 @@ DATASETS = {
 
 
 def m2_dir() -> tuple[str, dict]:
-    p3 = pd.read_csv(os.path.join(M2_ROOT, 'phase3_full_train.csv'))
-    p2 = pd.read_csv(os.path.join(M2_ROOT, 'search_phase2.csv'))
-    best = p2.sort_values('best_val_rank_ic', ascending=False).iloc[0]
-    row = p3[(np.isclose(p3['lr'], best['lr'])) & (np.isclose(p3['dropout'], best['dropout']))
-             & (p3['patience'] == best['patience'])].iloc[0]
-    return row['exp_dir'], {'lr': float(row['lr']), 'dropout': float(row['dropout']), 'patience': int(row['patience'])}
+    with open(REGISTRY_V2, encoding='utf-8') as f:
+        e = json.load(f)['predictions']['chartcnn_clean']
+    return os.path.join(PROJECT_ROOT, e['source']), e['hp']
 
 
 def load_preds(exp_dir: str, years: list[int], n: int = 5) -> pd.DataFrame:
