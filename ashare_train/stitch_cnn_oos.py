@@ -60,7 +60,7 @@ def load_models(exp_dir: str, n: int, device) -> list:
 @torch.no_grad()
 def predict_year(models, year: int, dataset_dir: str, sample_mode: str, device) -> pd.DataFrame:
     ds = _dataset([year], 20, 5, 'week', VOLUME_BAR, MA_LAGS, ASHARE_COUNTRY, dataset_dir, sample_mode)
-    loader = _loader(ds, 2048, shuffle=False)
+    loader = _loader(ds, int(os.environ.get('STITCH_BATCH', 256)), shuffle=False)
     ups = [_predict(m, loader, device)[0] for m in models]
     out = ds.meta.copy()
     out['up_prob'] = np.mean(ups, axis=0)
@@ -77,17 +77,19 @@ def main():
     ap.add_argument('--training', choices=['legacy', 'clean'], required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--regenerate', action='store_true')
+    ap.add_argument('--years', type=int, nargs='+', default=OOS_YEARS)
+    ap.add_argument('--stocks-root', default=ASHARE_STOCKS_SAVEPATH)
     args = ap.parse_args()
 
     out_path = os.path.join(PROJECT_ROOT, args.out.replace('/', os.sep))
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    dataset_dir = get_dataset_dir(ASHARE_COUNTRY, base_savepath=os.path.join(ASHARE_STOCKS_SAVEPATH, args.dataset_subdir))
+    dataset_dir = get_dataset_dir(ASHARE_COUNTRY, base_savepath=os.path.join(args.stocks_root, args.dataset_subdir))
     _, oos_mode = _sample_modes(args.training)
     device = _get_device()
     models = load_models(args.exp_dir, args.n_ensembles, device) if args.regenerate else None
 
     parts, checks = [], []
-    for y in OOS_YEARS:
+    for y in args.years:
         f = os.path.join(args.exp_dir, 'ensem_res', f'ensem{args.n_ensembles}_res_{y}.csv')
         old = pd.read_csv(f, dtype={'StockID': str}) if os.path.exists(f) else None
         if old is not None:
