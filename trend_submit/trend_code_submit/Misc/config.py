@@ -50,7 +50,7 @@ ASHARE_STOCKS_SAVEPATH = os.path.join(WORK_DIR, 'data', 'ashare_stocks_dataset')
 
 # CSMAR 原始数据（clean_spec 第 9 节“数据源更换为 CSMAR”）
 CSMAR_ROOT = os.environ.get('CSMAR_ROOT', r'F:\csmar_ashare_daily')
-SAMPLE_END = '2026-09-30'
+SAMPLE_END = os.environ.get('CNN_TRADING_SAMPLE_END', '2026-09-30')
 ASHARE_FUNDAMENTALS_PATH = os.path.join(ASHARE_PROCESSED_DATA_DIR, 'fundamentals_pit.parquet')
 ASHARE_MARKET_PATH = os.path.join(ASHARE_PROCESSED_DATA_DIR, 'market_daily.parquet')
 

@@ -69,8 +69,15 @@ F32 = ['Dnvaltrd', 'Dsmvosd', 'Dsmvtl2', 'Dsmvtl3', 'LimitStatus']
 COL_TYPES = {'Stkcd': pa.int32(), 'Trddt': pa.date32(), 'Markettype': pa.int8(), 'Trdsta': pa.int8(),
              'Filling': pa.int8(), **{c: pa.float64() for c in F64}, **{c: pa.float32() for c in F32}}
 MA_LAG = 20
-# (old code, new code, old last trading day, new first trading day); clean_spec 第 9 节“构建中发现的两类缺失”
-CODE_CHANGES = [(300114, 302132, '2025-02-14', '2025-02-17')]
+# Same legal entity renamed with a new code (old code, new code, old last trading day, new first trading day);
+# clean_spec 第 9 节“构建中发现的两类缺失”及“审计发现的问题与处理”
+CODE_CHANGES = [(300114, 302132, '2025-02-14', '2025-02-17'), (22, 1872, '2018-12-20', '2018-12-26'),
+                (43, 1914, '2019-12-12', '2019-12-16'), (601313, 601360, '2018-02-14', '2018-02-28'),
+                (600849, 601607, '2010-02-03', '2010-03-09')]
+FIRST_RET_TOL = 1e-3
+# (code, listing date of the current company); rows before it belong to an absorbed predecessor listed under the same code
+CODE_REUSE = [(600018, '2006-10-26')]
+LISTDT_LAG_TOL = 5
 RETURN_FIELDS = ['Dretwd', 'Dretnd', 'Adjprcwd', 'Adjprcnd', 'PreClosePrice']
 MAX_ALL_RETURN_FIELDS_MISSING = 10
 
@@ -131,32 +138,91 @@ def drop_rows_without_return_fields(d: pd.DataFrame, flow: dict, chk: dict) -> p
 
 
 def apply_code_changes(d: pd.DataFrame, chk: dict) -> pd.DataFrame:
-    """Merge a renamed security into one series under the new code; chain the new code's missing
-    comparable prices from the old code's last comparable price with CSMAR daily returns."""
+    """Merge a renamed security into one series under the new code.
+
+    First-day return of the new code: CSMAR's Dretwd/Dretnd if it equals close over the old code's last close;
+    otherwise (CSMAR treated the new code as an IPO) close over PreClosePrice, allowed only when PreClosePrice equals
+    the old last close. Comparable prices of the new code: chained from the old code's last comparable price with
+    the daily returns when missing; otherwise rescaled by a constant so that the first day continues the old series."""
     log = []
     for old, new, d0, d1 in CODE_CHANGES:
         o, n = d['Stkcd'] == old, d['Stkcd'] == new
+        if o.any() and not n.any() and d['Trddt'].max() < pd.Timestamp(d1):
+            log.append({'old': f'{old:06d}', 'new': f'{new:06d}', 'skipped': 'sample ends before the new code starts'})
+            continue
         if not o.any() or not n.any():
             raise ValueError(f'code change {old}->{new}: one side missing')
         last_o, first_n = d.loc[o, 'Trddt'].max(), d.loc[n, 'Trddt'].min()
         if last_o != pd.Timestamp(d0) or first_n != pd.Timestamp(d1):
             raise ValueError(f'code change {old}->{new}: dates {last_o.date()} / {first_n.date()} != {d0} / {d1}')
         row_o = d.loc[o & (d['Trddt'] == last_o)].iloc[0]
-        row_n = d.loc[n & (d['Trddt'] == first_n)].iloc[0]
-        if abs(row_n['PreClosePrice'] - row_o['Clsprc']) >= 0.005:
-            raise ValueError(f'code change {old}->{new}: PreClose {row_n["PreClosePrice"]} != last close {row_o["Clsprc"]}')
         idx_n = d.loc[n].sort_values('Trddt').index
-        if d.loc[idx_n, ['Adjprcwd', 'Adjprcnd']].notna().any().any():
-            raise ValueError(f'code change {old}->{new}: new code already has comparable prices; rule needs review')
+        i0 = idx_n[0]
         if d.loc[idx_n, ['Dretwd', 'Dretnd']].isna().any().any():
             raise ValueError(f'code change {old}->{new}: new code has missing daily returns')
-        d.loc[idx_n, 'Adjprcwd'] = row_o['Adjprcwd'] * np.cumprod(1.0 + d.loc[idx_n, 'Dretwd'].to_numpy())
-        d.loc[idx_n, 'Adjprcnd'] = row_o['Adjprcnd'] * np.cumprod(1.0 + d.loc[idx_n, 'Dretnd'].to_numpy())
+        r_cc = d.at[i0, 'Clsprc'] / row_o['Clsprc'] - 1
+        entry = {'old': f'{old:06d}', 'new': f'{new:06d}', 'old_last_day': d0, 'new_first_day': d1,
+                 'old_rows': int(o.sum()), 'new_rows': len(idx_n), 'csmar_first_dretwd': float(d.at[i0, 'Dretwd'])}
+        for ret in ('Dretwd', 'Dretnd'):
+            if abs(d.at[i0, ret] - r_cc) > FIRST_RET_TOL:
+                if abs(d.at[i0, 'PreClosePrice'] - row_o['Clsprc']) >= 0.005:
+                    raise ValueError(f'code change {old}->{new}: first-day {ret} {d.at[i0, ret]} != close/old close '
+                                     f'{r_cc} and PreClose != old close; needs manual review')
+                d.at[i0, ret] = d.at[i0, 'Clsprc'] / d.at[i0, 'PreClosePrice'] - 1
+                entry[f'first_{ret}_overridden'] = float(d.at[i0, ret])
+        for adj, ret in (('Adjprcwd', 'Dretwd'), ('Adjprcnd', 'Dretnd')):
+            a = d.loc[idx_n, adj]
+            if a.isna().all():
+                d.loc[idx_n, adj] = row_o[adj] * np.cumprod(1.0 + d.loc[idx_n, ret].to_numpy())
+                entry[f'{adj}_rule'] = 'chained'
+            elif a.notna().all():
+                c = row_o[adj] * (1.0 + d.at[i0, ret]) / a.iloc[0]
+                d.loc[idx_n, adj] = a * c
+                entry[f'{adj}_rule'] = f'rescaled x{c:.6f}'
+            else:
+                raise ValueError(f'code change {old}->{new}: {adj} partially missing')
         d.loc[o, 'Stkcd'] = new
-        log.append({'old': f'{old:06d}', 'new': f'{new:06d}', 'old_last_day': d0, 'new_first_day': d1,
-                    'old_rows': int(o.sum()), 'new_rows': len(idx_n)})
+        log.append(entry)
     chk['code_changes'] = log
     return d
+
+
+def read_company(root: Path) -> pd.DataFrame:
+    path = sorted(root.glob(COMPANY_ZIP_GLOB))
+    if len(path) != 1:
+        raise RuntimeError(f'expected one company zip, found {path}')
+    with zipfile.ZipFile(path[0]) as z:
+        co = pd.read_csv(z.open('TRDNEW_Co.csv'), dtype=str)
+    if co['Stkcd'].duplicated().any():
+        raise ValueError('TRDNEW_Co has duplicate Stkcd')
+    return co
+
+
+def drop_code_reuse_predecessors(d: pd.DataFrame, s: pd.DataFrame, co: pd.DataFrame, flow: dict,
+                                 chk: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """A code whose company-file listing date is more than LISTDT_LAG_TOL market days after its first trading row
+    was reused by a new listing; the earlier rows belong to the predecessor and are dropped. Detected cases must
+    equal CODE_REUSE."""
+    cal = np.sort(d.loc[d['Markettype'].isin([1, 4]), 'Trddt'].unique())
+    first = d.groupby('Stkcd')['Trddt'].min()
+    listdt = pd.to_datetime(co.set_index(co['Stkcd'].astype(int))['Listdt'], errors='coerce').reindex(first.index)
+    targets = {new for _, new, _, _ in CODE_CHANGES}
+    ok = listdt.notna() & ~first.index.isin(list(targets))
+    lag = np.searchsorted(cal, first[ok].to_numpy()) - np.searchsorted(cal, listdt[ok].to_numpy())
+    found = {(int(c), str(listdt[c].date())) for c in first[ok].index[lag < -LISTDT_LAG_TOL]}
+    if found != {(c, dt) for c, dt in CODE_REUSE}:
+        raise ValueError(f'code reuse detected {sorted(found)} != registered {CODE_REUSE}')
+    log = []
+    for code, dt in CODE_REUSE:
+        m = (d['Stkcd'] == code) & (d['Trddt'] < pd.Timestamp(dt))
+        ms = (s['Stkcd'] == code) & (s['Trddt'] < pd.Timestamp(dt))
+        log.append({'code': f'{code:06d}', 'listdt': dt, 'trading_rows_dropped': int(m.sum()),
+                    'suspension_rows_dropped': int(ms.sum()),
+                    'predecessor_span': [str(d.loc[m, 'Trddt'].min().date()), str(d.loc[m, 'Trddt'].max().date())]})
+        d, s = d[~m], s[~ms]
+    flow['drop_code_reuse_predecessor'] = sum(x['trading_rows_dropped'] for x in log)
+    chk['code_reuse'] = log
+    return d, s
 
 
 def build_panel(d: pd.DataFrame, chk: dict) -> pd.DataFrame:
@@ -234,20 +300,13 @@ def write_feather_consuming(df: pd.DataFrame, cols: list[str], path: str) -> Non
     feather.write_feather(pa.Table.from_arrays(arrays, names=cols), path)
 
 
-def build_stock_info(root: Path, panel: pd.DataFrame) -> pd.DataFrame:
-    path = sorted(root.glob(COMPANY_ZIP_GLOB))
-    if len(path) != 1:
-        raise RuntimeError(f'expected one company zip, found {path}')
-    with zipfile.ZipFile(path[0]) as z:
-        co = pd.read_csv(z.open('TRDNEW_Co.csv'), dtype=str)
+def build_stock_info(co: pd.DataFrame, panel: pd.DataFrame) -> pd.DataFrame:
     co = co.rename(columns={'Stkcd': 'StockID', 'Stknme': 'name', 'Listdt': 'list_date',
                             'DelistedDate': 'delist_date', 'Nnindcd': 'industry', 'Nnindnme': 'industry_name',
                             'Markettype': 'markettype_co'})
     co['StockID'] = co['StockID'].str.zfill(6)
     for c in ['list_date', 'delist_date']:
         co[c] = pd.to_datetime(co[c], errors='coerce')
-    if co['StockID'].duplicated().any():
-        raise ValueError('TRDNEW_Co has duplicate Stkcd')
     span = panel.groupby('StockID', observed=True)['Date'].agg(first_trade='min', last_trade='max', n_rows='size')
     span = span.reset_index()
     span['StockID'] = span['StockID'].astype(str)
@@ -305,6 +364,8 @@ def main(argv=None) -> int:
     flow['trading_rows_after_dedup'] = len(d)
     d = drop_rows_without_return_fields(d, flow, chk)
     d = apply_code_changes(d, chk)
+    co = read_company(root)
+    d, s = drop_code_reuse_predecessors(d, s, co, flow, chk)
     flow['trading_rows_final'] = len(d)
     logger.info(f'交易行 {len(d):,}，{d["Stkcd"].nunique()} 只，用时 {time.time() - t0:.0f}s')
 
@@ -313,12 +374,15 @@ def main(argv=None) -> int:
     logger.info(f'面板构建完成，用时 {time.time() - t0:.0f}s')
     os.makedirs(ASHARE_PROCESSED_DATA_DIR, exist_ok=True)
 
+    for c in chk['code_changes']:
+        if 'skipped' not in c:
+            s.loc[s['Stkcd'] == int(c['old']), 'Stkcd'] = int(c['new'])
     s = s.rename(columns={'Stkcd': 'StockID', 'Trddt': 'Date'})
     s['StockID'] = s['StockID'].map(lambda x: f'{x:06d}')
     s.sort_values(['StockID', 'Date']).to_parquet(
         os.path.join(ASHARE_PROCESSED_DATA_DIR, 'suspension_days.parquet'), index=False)
 
-    info = build_stock_info(root, panel)
+    info = build_stock_info(co, panel)
     info.to_feather(ASHARE_STOCK_INFO_PATH)
 
     pd.Series(flow, name='rows').rename_axis('step').to_csv(

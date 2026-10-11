@@ -41,7 +41,11 @@ logger = logging.getLogger('fundamentals')
 QUARTER_ENDS = {'03-31': 3, '06-30': 6, '09-30': 9, '12-31': 12}
 # statutory deadline (month, day, year offset) by fiscal quarter
 DEADLINE = {3: (4, 30, 0), 6: (8, 31, 0), 9: (10, 31, 0), 12: (4, 30, 1)}
-CODE_CHANGES = [('300114', '302132')]
+CODE_CHANGES = [('300114', '302132'), ('000022', '001872'), ('000043', '001914'), ('601313', '601360'),
+                ('600849', '601607')]
+# code reused by a new listing (1_preprocess_ashare_data.CODE_REUSE): statements whose statutory deadline precedes
+# the new listing date belong to the absorbed predecessor and are dropped before TTM differencing
+CODE_REUSE = [('600018', '2006-10-26')]
 BS_COLS = {'A003100000': 'eq_parent', 'A003000000': 'eq_total', 'A003200000': 'minority',
            'A003112101': 'pref', 'A003112201': 'perp', 'A001000000': 'assets', 'A002000000': 'liab'}
 IS_COLS = {'B002000101': 'ni_parent', 'B002000000': 'ni_total', 'B001100000': 'rev_total', 'B001101000': 'rev_op'}
@@ -74,24 +78,44 @@ def keep_consolidated_quarters(d: pd.DataFrame, what: str, chk: dict) -> pd.Data
 
 
 def merge_code_changes(d: pd.DataFrame, what: str, chk: dict) -> pd.DataFrame:
+    """Records of the new code are kept; periods only reported under the old code are added with seg = 1 so that
+    TTM differencing never mixes the two segments (e.g. a backdoor listing whose pre-change statements are the shell's)."""
     log = []
+    d['seg'] = np.int8(0)
     for old, new in CODE_CHANGES:
         o, n = d['StockID'] == old, d['StockID'] == new
         extra = o & ~d['Accper'].isin(d.loc[n, 'Accper'])
         d.loc[extra, 'StockID'] = new
+        d.loc[extra, 'seg'] = np.int8(1)
         d = d[~(d['StockID'] == old)]
         log.append({'old': old, 'new': new, 'old_rows_added_to_new': int(extra.sum()), 'old_rows_dropped': int(o.sum() - extra.sum())})
     chk[f'{what}_code_changes'] = log
     return d
 
 
+def statutory_deadline(accper: pd.Series) -> pd.DatetimeIndex:
+    q, y = accper.dt.month.to_numpy(), accper.dt.year.to_numpy()
+    return pd.to_datetime([f'{yy + DEADLINE[m][2]}-{DEADLINE[m][0]:02d}-{DEADLINE[m][1]:02d}' for yy, m in zip(y, q)])
+
+
+def drop_code_reuse_predecessors(d: pd.DataFrame, what: str, chk: dict) -> pd.DataFrame:
+    log = []
+    for code, listdt in CODE_REUSE:
+        m = (d['StockID'] == code) & (statutory_deadline(d['Accper']) < pd.Timestamp(listdt))
+        log.append({'code': code, 'listdt': listdt, 'rows_dropped': int(m.sum()),
+                    'last_dropped_accper': str(d.loc[m, 'Accper'].max().date()) if m.any() else None})
+        d = d[~m]
+    chk[f'{what}_code_reuse'] = log
+    return d
+
+
 def ttm(d: pd.DataFrame, cum_col: str) -> tuple[pd.Series, pd.Series]:
     """TTM = cum(y,q) + annual(y-1) - cum(y-1,q); Q4 = annual; fallback = annual(y-1) when a piece is missing."""
     y, q = d['Accper'].dt.year, d['Accper'].dt.month
-    key = d[['StockID']].assign(y=y, q=q, v=d[cum_col])
-    lut = key.set_index(['StockID', 'y', 'q'])['v']
-    annual_prev = lut.reindex(pd.MultiIndex.from_arrays([key['StockID'], y - 1, np.full(len(d), 12)])).to_numpy()
-    same_q_prev = lut.reindex(pd.MultiIndex.from_arrays([key['StockID'], y - 1, q])).to_numpy()
+    key = d[['StockID', 'seg']].assign(y=y, q=q, v=d[cum_col])
+    lut = key.set_index(['StockID', 'seg', 'y', 'q'])['v']
+    annual_prev = lut.reindex(pd.MultiIndex.from_arrays([key['StockID'], key['seg'], y - 1, np.full(len(d), 12)])).to_numpy()
+    same_q_prev = lut.reindex(pd.MultiIndex.from_arrays([key['StockID'], key['seg'], y - 1, q])).to_numpy()
     cur = d[cum_col].to_numpy()
     full = cur + annual_prev - same_q_prev
     out = np.where(q.to_numpy() == 12, cur, full)
@@ -109,6 +133,8 @@ def main() -> int:
     is_ = keep_consolidated_quarters(read_statement('利润表*.zip', 'FS_Comins.csv', IS_COLS), 'income_statement', chk)
     bs = merge_code_changes(bs, 'balance_sheet', chk)
     is_ = merge_code_changes(is_, 'income_statement', chk)
+    bs = drop_code_reuse_predecessors(bs, 'balance_sheet', chk)
+    is_ = drop_code_reuse_predecessors(is_, 'income_statement', chk)
 
     be = bs['eq_parent'] - bs['pref'].fillna(0.0) - bs['perp'].fillna(0.0)
     fb = bs['eq_total'] - bs['minority'].fillna(0.0) - bs['pref'].fillna(0.0) - bs['perp'].fillna(0.0)
@@ -131,9 +157,7 @@ def main() -> int:
 
     cal = pd.read_feather(ASHARE_PANEL_PATH, columns=['Date', 'Markettype'])
     cal = np.sort(cal.loc[cal['Markettype'].isin([1, 4]), 'Date'].unique())
-    q = f['Accper'].dt.month.to_numpy()
-    yrs = f['Accper'].dt.year.to_numpy()
-    deadline = pd.to_datetime([f'{y + DEADLINE[m][2]}-{DEADLINE[m][0]:02d}-{DEADLINE[m][1]:02d}' for y, m in zip(yrs, q)])
+    deadline = statutory_deadline(f['Accper'])
     pos = np.searchsorted(cal, deadline.to_numpy(), side='right')
     f['deadline'] = deadline
     f['avail_date'] = pd.NaT
