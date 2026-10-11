@@ -48,6 +48,12 @@ ASHARE_RAW_UNADJ_DIR = os.path.join(ASHARE_RAW_ROOT, '每只股票一个文件',
 ASHARE_PROCESSED_DATA_DIR = os.path.join(WORK_DIR, 'data', 'ashare_processed_data')
 ASHARE_STOCKS_SAVEPATH = os.path.join(WORK_DIR, 'data', 'ashare_stocks_dataset')
 
+# CSMAR 原始数据（clean_spec 第 9 节“数据源更换为 CSMAR”）
+CSMAR_ROOT = os.environ.get('CSMAR_ROOT', r'F:\csmar_ashare_daily')
+SAMPLE_END = '2026-09-30'
+ASHARE_FUNDAMENTALS_PATH = os.path.join(ASHARE_PROCESSED_DATA_DIR, 'fundamentals_pit.parquet')
+ASHARE_MARKET_PATH = os.path.join(ASHARE_PROCESSED_DATA_DIR, 'market_daily.parquet')
+
 # 干净版本（clean-data）：统一日面板、周度样本键、模型输入
 ASHARE_PANEL_PATH = os.path.join(ASHARE_PROCESSED_DATA_DIR, 'ashare_ret.feather')
 ASHARE_STOCK_INFO_PATH = os.path.join(ASHARE_PROCESSED_DATA_DIR, 'ashare_stock_info.feather')

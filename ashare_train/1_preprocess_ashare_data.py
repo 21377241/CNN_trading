@@ -1,23 +1,30 @@
 # -*- coding: utf-8 -*-
 """
-1_preprocess_ashare_data.py - A 股全市场统一日面板（clean_spec 第 2 节 D1、D2、D5、D8）
+1_preprocess_ashare_data.py - A 股统一日面板（CSMAR 版，clean_spec 第 9 节“数据源更换为 CSMAR”）
 
-读取每只股票的后复权 CSV 与不复权 CSV，输出：
-  WORK_SPACE/data/ashare_processed_data/ashare_ret.feather        统一日面板（含 ST 行）
-  WORK_SPACE/data/ashare_processed_data/ashare_stock_info.feather  静态信息（行业、上市/退市日期）
-  WORK_SPACE/data/ashare_processed_data/panel_check.json           验收检查
+读取 CSMAR_ROOT 下的日个股回报率文件（TRDNEW_Dalyr，多个分段 zip）与公司文件（TRDNEW_Co），输出：
+  WORK_SPACE/data/ashare_processed_data/ashare_ret.feather        统一日面板（只含交易行，含 ST 行与北交所）
+  WORK_SPACE/data/ashare_processed_data/ashare_stock_info.feather  静态信息（上市/退市日期、行业、板块）
+  WORK_SPACE/data/ashare_processed_data/suspension_days.parquet    停牌日（Filling = 1）的 (StockID, Date)
+  WORK_SPACE/data/ashare_processed_data/panel_flow.csv             每一步剔除的行数
+  WORK_SPACE/data/ashare_processed_data/panel_check.json           构建时的计数与断言结果
 
 日面板列：
-  Date, StockID(category)
-  Open, High, Low, Close        后复权价格（float64）
-  Close_raw, adj_factor         不复权收盘价；复权因子 = Close / Close_raw
-  Vol                           送转复权后的成交量 = Vol_raw / adj_factor（上市时股本口径）
-  Vol_raw                       原始“成交量（股）”
-  Amount, Turnover, pct_chg, FloatShares, TotalShares, FloatMV, MarketCap(=FloatMV), PE_TTM, PB
-  is_ST, is_limit_up            原始逐日标记
-  Ret                           Close / 前一行 Close - 1，不裁剪；每只股票第一行为 NaN
-  MA20                          最近 20 个有效收盘价的均值（按行滚动，min_periods=20）
+  Date, StockID(category, 6 位代码)
+  Open, High, Low, Close        后复权价格 = 原始价 × adj_factor
+  Close_raw                     原始收盘价 Clsprc
+  adj_factor, adj_factor_nd     Adjprcwd / Clsprc（含现金红利）、Adjprcnd / Clsprc（不含现金红利）
+  Vol                           Dnshrtrd / adj_factor_nd（上市时股本口径，只按送转、配股等股本变动复权）
+  Vol_raw, Amount               Dnshrtrd（股）、Dnvaltrd（元）
+  FloatMV, MarketCap            Dsmvosd × 1000（元）；MarketCap = FloatMV
+  TotalMV                       Dsmvtl3 × 1000（含 B 股、H 股的公司总市值，用于估值比率）
+  FloatShares, TotalShares      FloatMV / Clsprc、Dsmvtl2 × 1000 / Clsprc
+  Turnover                      Dnshrtrd / FloatShares（小数）
+  is_ST                         Trdsta ∈ {2,3,5,6,8,9,11,12,14,15,16}
+  Ret, Ret_nd                   Dretwd、Dretnd；每只股票第一行为 NaN；不裁剪
+  MA20                          最近 20 个有效后复权收盘价的均值（按行滚动，min_periods=20）
   EWMA_vol                      Ret² 的 EWMA（alpha=0.05），滞后一期；只作参考，不用于样本筛选
+  PreClose, LimitUp, LimitDown, LimitStatus, Markettype, Trdsta   CSMAR 原字段
 
 用法:
   python ashare_train/1_preprocess_ashare_data.py [--force]
@@ -30,11 +37,13 @@ import logging
 import os
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from joblib import Parallel, delayed
+import pyarrow as pa
+import pyarrow.csv as pacsv
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CODE_PKG = os.path.join(PROJECT_ROOT, 'trend_submit', 'trend_code_submit')
@@ -42,170 +51,292 @@ if CODE_PKG not in sys.path:
     sys.path.insert(0, CODE_PKG)
 
 from Misc.config import (  # noqa: E402
-    ASHARE_RAW_ADJ_DIR, ASHARE_RAW_UNADJ_DIR, ASHARE_PROCESSED_DATA_DIR,
-    ASHARE_PANEL_PATH, ASHARE_STOCK_INFO_PATH, PRE_CLEAN_WORK_DIR,
+    ASHARE_PANEL_PATH, ASHARE_PROCESSED_DATA_DIR, ASHARE_STOCK_INFO_PATH, CSMAR_ROOT, SAMPLE_END,
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
 logger = logging.getLogger('preprocess')
 
-DAILY = {
-    '日期': 'Date', '开盘价': 'Open', '最高价': 'High', '最低价': 'Low', '收盘价': 'Close',
-    '成交量（股）': 'Vol_raw', '成交额（元）': 'Amount', '换手率': 'Turnover', '涨幅%': 'pct_chg',
-    '流通股本（股）': 'FloatShares', '总股本（股）': 'TotalShares', '流通市值（元）': 'FloatMV',
-    '滚动市盈率': 'PE_TTM', '市净率': 'PB', '是否ST': 'is_ST', '是否涨停': 'is_limit_up',
-}
-STATIC = {'代码': 'code', '名称': 'name', '所属行业': 'industry', '上市时间': 'list_date', '退市时间': 'delist_date'}
-PRICE64 = ['Open', 'High', 'Low', 'Close', 'Vol_raw', 'Amount', 'FloatShares', 'TotalShares', 'FloatMV']
-FLOAT32 = ['Turnover', 'pct_chg', 'PE_TTM', 'PB']
+DAILY_ZIP_GLOB = '日个股回报率文件*.zip'
+COMPANY_ZIP_GLOB = '公司文件*.zip'
+B_SHARE_MARKETS = (2, 8)
+ST_CODES = (2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 16)
+KEY = ['Stkcd', 'Trddt']
+
+F64 = ['Opnprc', 'Hiprc', 'Loprc', 'Clsprc', 'Dnshrtrd', 'Dretwd', 'Dretnd', 'Adjprcwd', 'Adjprcnd',
+       'PreClosePrice', 'LimitDown', 'LimitUp']
+F32 = ['Dnvaltrd', 'Dsmvosd', 'Dsmvtl2', 'Dsmvtl3', 'LimitStatus']
+COL_TYPES = {'Stkcd': pa.int32(), 'Trddt': pa.date32(), 'Markettype': pa.int8(), 'Trdsta': pa.int8(),
+             'Filling': pa.int8(), **{c: pa.float64() for c in F64}, **{c: pa.float32() for c in F32}}
 MA_LAG = 20
+# (old code, new code, old last trading day, new first trading day); clean_spec 第 9 节“构建中发现的两类缺失”
+CODE_CHANGES = [(300114, 302132, '2025-02-14', '2025-02-17')]
+RETURN_FIELDS = ['Dretwd', 'Dretnd', 'Adjprcwd', 'Adjprcnd', 'PreClosePrice']
+MAX_ALL_RETURN_FIELDS_MISSING = 10
 
 
-def read_one(adj_path: Path, unadj_dir: Path) -> tuple[pd.DataFrame, dict]:
-    d = pd.read_csv(adj_path, encoding='utf-8-sig', usecols=list(DAILY) + list(STATIC))
-    sid = adj_path.stem.zfill(6)
-    info = {
-        'StockID': sid,
-        'name': d['名称'].iloc[-1] if len(d) else None,
-        'industry': d['所属行业'].mode().iloc[0] if d['所属行业'].notna().any() else None,
-        'n_industry': int(d['所属行业'].nunique()),
-        'list_date': pd.to_datetime(d['上市时间'], errors='coerce', format='mixed').min(),
-        'delist_date': pd.to_datetime(d['退市时间'], errors='coerce', format='mixed').min(),
-        'rows_raw': len(d),
-    }
-    d = d[list(DAILY)].rename(columns=DAILY)
-    d['Date'] = pd.to_datetime(d['Date'], errors='coerce')
-    for c in PRICE64:
-        d[c] = pd.to_numeric(d[c], errors='coerce').astype('float64')
-    for c in FLOAT32:
-        d[c] = pd.to_numeric(d[c], errors='coerce').astype('float32')
-    d['is_ST'] = (d['is_ST'].astype(str).str.strip() == '是').astype('int8')
-    d['is_limit_up'] = (d['is_limit_up'].astype(str).str.strip() == '是').astype('int8')
-    d = d.dropna(subset=['Date', 'Close'])
-    d = d[(d['Close'] > 0) & (d['Open'] > 0)]
-    d = d.sort_values('Date').drop_duplicates('Date', keep='last')
-
-    unadj_path = unadj_dir / adj_path.name
-    info['has_unadj'] = unadj_path.exists()
-    if info['has_unadj']:
-        u = pd.read_csv(unadj_path, encoding='utf-8-sig', usecols=['日期', '收盘价'])
-        u = u.rename(columns={'日期': 'Date', '收盘价': 'Close_raw'})
-        u['Date'] = pd.to_datetime(u['Date'], errors='coerce')
-        u['Close_raw'] = pd.to_numeric(u['Close_raw'], errors='coerce')
-        u = u.dropna().drop_duplicates('Date', keep='last')
-        u = u[u['Close_raw'] > 0]
-        d = d.merge(u, on='Date', how='left')
-    else:
-        d['Close_raw'] = np.nan
-    fac = d['Close'] / d['Close_raw']
-    info['adj_factor_missing_rows'] = int(fac.isna().sum())
-    fac = fac.ffill().bfill()
-    d['adj_factor'] = fac.astype('float64')
-    d['Close_raw'] = d['Close_raw'].astype('float32')
-    vol_adj = d['Vol_raw'].astype('float64') / d['adj_factor']
-    d['Vol'] = vol_adj.where(d['adj_factor'].notna(), d['Vol_raw'].astype('float64'))
-    d.insert(1, 'StockID', sid)
-    info['rows'] = len(d)
-    return d.reset_index(drop=True), info
+def read_daily_zip(path: Path, end: pd.Timestamp, flow: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Read one segment zip; return (trading rows, suspension keys). Updates the row-flow counters."""
+    trade, susp = [], []
+    with zipfile.ZipFile(path) as z:
+        names = sorted(n for n in z.namelist() if n.startswith('TRDNEW_Dalyr') and n.endswith('.csv'))
+        if not names:
+            raise RuntimeError(f'{path.name}: no TRDNEW_Dalyr csv')
+        for n in names:
+            with z.open(n) as fh:
+                t = pacsv.read_csv(fh, convert_options=pacsv.ConvertOptions(
+                    column_types=COL_TYPES, include_columns=list(COL_TYPES)))
+            d = t.to_pandas()
+            d['Trddt'] = pd.to_datetime(d['Trddt'])
+            flow['raw'] += len(d)
+            m = d['Markettype'].isin(B_SHARE_MARKETS)
+            flow['drop_b_share'] += int(m.sum())
+            d = d[~m]
+            m = d['Trddt'] > end
+            flow['drop_after_sample_end'] += int(m.sum())
+            d = d[~m]
+            m = d['Filling'] == 2
+            flow['drop_filling2_holiday'] += int(m.sum())
+            d = d[~m]
+            m = d['Filling'] == 1
+            flow['drop_filling1_suspension'] += int(m.sum())
+            susp.append(d.loc[m, KEY])
+            d = d[~m]
+            bad = ~d['Filling'].eq(0)
+            if bad.any():
+                raise ValueError(f'{path.name}/{n}: unexpected Filling values {d.loc[bad, "Filling"].unique()}')
+            trade.append(d)
+    return pd.concat(trade, ignore_index=True), pd.concat(susp, ignore_index=True)
 
 
-def add_derived(panel: pd.DataFrame) -> pd.DataFrame:
-    g = panel.groupby('StockID', sort=False, observed=True)
-    prev = g['Close'].shift(1)
-    panel['Ret'] = panel['Close'] / prev - 1.0
-    panel['MA20'] = g['Close'].transform(lambda s: s.rolling(MA_LAG, min_periods=MA_LAG).mean())
-    r2 = panel['Ret'].fillna(0.0) ** 2
-    panel['EWMA_vol'] = r2.groupby(panel['StockID'], sort=False, observed=True).transform(
-        lambda x: x.ewm(alpha=0.05, adjust=False).mean().shift(1))
-    panel['MarketCap'] = panel['FloatMV'].astype('float64')
-    return panel
+def dedup(d: pd.DataFrame, what: str, chk: dict) -> pd.DataFrame:
+    """Drop exact duplicate rows; raise if the same key carries different content."""
+    n0 = len(d)
+    d = d.drop_duplicates()
+    chk[f'{what}_exact_duplicates_dropped'] = n0 - len(d)
+    dup = d.duplicated(KEY, keep=False)
+    if dup.any():
+        sample = d.loc[dup].sort_values(KEY).head(10).to_string()
+        raise ValueError(f'{what}: {int(dup.sum())} rows share a key with different content\n{sample}')
+    return d
 
 
-def split_volume_check(panel: pd.DataFrame, rng_seed: int = 0, n_stocks: int = 400) -> dict:
-    """送转除权（复权因子跳升 > 5%）前后 5 日成交量均值之比的中位数。"""
-    rng = np.random.default_rng(rng_seed)
-    ids = rng.choice(panel['StockID'].cat.categories, n_stocks, replace=False)
-    sub = panel[panel['StockID'].isin(ids)]
-    ratios = {'Vol': [], 'Vol_raw': [], 'Turnover': []}
-    n_events = 0
-    for _, s in sub.groupby('StockID', sort=False, observed=True):
-        f = s['adj_factor'].to_numpy()
-        jump = np.flatnonzero(f[1:] / f[:-1] - 1 > 0.05) + 1
-        for i in jump:
-            if i < 5 or i + 5 > len(s):
-                continue
-            n_events += 1
-            for c in ratios:
-                v = s[c].to_numpy(dtype=float)
-                pre, post = v[i - 5:i].mean(), v[i:i + 5].mean()
-                if pre > 0:
-                    ratios[c].append(post / pre)
-    return {'n_events': n_events, **{f'median_post_pre_{c}': float(np.median(v)) for c, v in ratios.items() if v}}
+def drop_rows_without_return_fields(d: pd.DataFrame, flow: dict, chk: dict) -> pd.DataFrame:
+    m = d[RETURN_FIELDS].isna().all(axis=1)
+    flow['drop_all_return_fields_missing'] = int(m.sum())
+    chk['all_return_fields_missing_rows'] = d.loc[m, KEY].astype(str).values.tolist()
+    if m.sum() > MAX_ALL_RETURN_FIELDS_MISSING:
+        raise ValueError(f'{int(m.sum())} trading rows miss all return fields (limit {MAX_ALL_RETURN_FIELDS_MISSING})')
+    return d[~m]
+
+
+def apply_code_changes(d: pd.DataFrame, chk: dict) -> pd.DataFrame:
+    """Merge a renamed security into one series under the new code; chain the new code's missing
+    comparable prices from the old code's last comparable price with CSMAR daily returns."""
+    log = []
+    for old, new, d0, d1 in CODE_CHANGES:
+        o, n = d['Stkcd'] == old, d['Stkcd'] == new
+        if not o.any() or not n.any():
+            raise ValueError(f'code change {old}->{new}: one side missing')
+        last_o, first_n = d.loc[o, 'Trddt'].max(), d.loc[n, 'Trddt'].min()
+        if last_o != pd.Timestamp(d0) or first_n != pd.Timestamp(d1):
+            raise ValueError(f'code change {old}->{new}: dates {last_o.date()} / {first_n.date()} != {d0} / {d1}')
+        row_o = d.loc[o & (d['Trddt'] == last_o)].iloc[0]
+        row_n = d.loc[n & (d['Trddt'] == first_n)].iloc[0]
+        if abs(row_n['PreClosePrice'] - row_o['Clsprc']) >= 0.005:
+            raise ValueError(f'code change {old}->{new}: PreClose {row_n["PreClosePrice"]} != last close {row_o["Clsprc"]}')
+        idx_n = d.loc[n].sort_values('Trddt').index
+        if d.loc[idx_n, ['Adjprcwd', 'Adjprcnd']].notna().any().any():
+            raise ValueError(f'code change {old}->{new}: new code already has comparable prices; rule needs review')
+        if d.loc[idx_n, ['Dretwd', 'Dretnd']].isna().any().any():
+            raise ValueError(f'code change {old}->{new}: new code has missing daily returns')
+        d.loc[idx_n, 'Adjprcwd'] = row_o['Adjprcwd'] * np.cumprod(1.0 + d.loc[idx_n, 'Dretwd'].to_numpy())
+        d.loc[idx_n, 'Adjprcnd'] = row_o['Adjprcnd'] * np.cumprod(1.0 + d.loc[idx_n, 'Dretnd'].to_numpy())
+        d.loc[o, 'Stkcd'] = new
+        log.append({'old': f'{old:06d}', 'new': f'{new:06d}', 'old_last_day': d0, 'new_first_day': d1,
+                    'old_rows': int(o.sum()), 'new_rows': len(idx_n)})
+    chk['code_changes'] = log
+    return d
+
+
+def build_panel(d: pd.DataFrame, chk: dict) -> pd.DataFrame:
+    for c in ['Clsprc', 'Adjprcwd', 'Adjprcnd']:
+        bad = ~(d[c] > 0)
+        chk[f'nonpositive_or_missing_{c}'] = int(bad.sum())
+        if bad.any():
+            raise ValueError(f'{int(bad.sum())} trading rows with non-positive or missing {c}:\n'
+                             f'{d.loc[bad, KEY + [c]].head(10).to_string()}')
+    order = np.lexsort((d['Trddt'].to_numpy(), d['Stkcd'].to_numpy()))
+    d = d.reset_index(drop=True)
+    for col in list(d.columns):
+        d[col] = d[col].to_numpy()[order]
+    del order
+
+    o, h, l, c = (d[x].to_numpy() for x in ['Opnprc', 'Hiprc', 'Loprc', 'Clsprc'])
+    chk['ohlc_inconsistent_rows'] = int(((l > np.minimum(o, c) + 1e-9) | (h < np.maximum(o, c) - 1e-9)
+                                         | (o <= 0) | (h <= 0) | (l <= 0)).sum())
+    chk['zero_volume_trading_rows'] = int((d['Dnshrtrd'] <= 0).sum())
+    del o, h, l, c
+
+    # in-place construction (memory): new columns are added, consumed raw columns dropped
+    d.rename(columns={'Trddt': 'Date', 'Stkcd': 'StockID', 'Clsprc': 'Close_raw', 'Dnshrtrd': 'Vol_raw',
+                      'Dnvaltrd': 'Amount', 'PreClosePrice': 'PreClose', 'Dretwd': 'Ret', 'Dretnd': 'Ret_nd'},
+             inplace=True)
+    out = d
+    del d
+    out['adj_factor'] = out['Adjprcwd'] / out['Close_raw']
+    out['adj_factor_nd'] = out['Adjprcnd'] / out['Close_raw']
+    out['Open'] = out.pop('Opnprc') * out['adj_factor']
+    out['High'] = out.pop('Hiprc') * out['adj_factor']
+    out['Low'] = out.pop('Loprc') * out['adj_factor']
+    out['Close'] = out.pop('Adjprcwd')
+    out.pop('Adjprcnd')
+    out['Vol'] = out['Vol_raw'] / out['adj_factor_nd']
+    out['FloatMV'] = out.pop('Dsmvosd').astype('float64') * 1000.0
+    out['MarketCap'] = out['FloatMV']
+    out['TotalMV'] = out.pop('Dsmvtl3').astype('float64') * 1000.0
+    out['FloatShares'] = out['FloatMV'] / out['Close_raw']
+    out['TotalShares'] = out.pop('Dsmvtl2').astype('float64') * 1000.0 / out['Close_raw']
+    out['Turnover'] = (out['Vol_raw'] / out['FloatShares']).astype('float32')
+    out['is_ST'] = out['Trdsta'].isin(ST_CODES).astype('int8')
+    out.pop('Filling')
+    first = out['StockID'].ne(out['StockID'].shift(1))
+    out['Ret'] = out['Ret'].mask(first)
+    out['Ret_nd'] = out['Ret_nd'].mask(first)
+    for col in ['Ret', 'FloatMV', 'TotalMV', 'TotalShares']:
+        chk[f'missing_{col}'] = int(out[col].isna().sum()) - (int(first.sum()) if col == 'Ret' else 0)
+
+    g = out.groupby('StockID', sort=False)
+    out['MA20'] = g['Close'].transform(lambda s: s.rolling(MA_LAG, min_periods=MA_LAG).mean())
+    r2 = out['Ret'].fillna(0.0) ** 2
+    out['EWMA_vol'] = r2.groupby(out['StockID'], sort=False).transform(
+        lambda x: x.ewm(alpha=0.05, adjust=False).mean().shift(1)).astype('float32')
+    codes = np.unique(out['StockID'].to_numpy())
+    out['StockID'] = pd.Categorical.from_codes(np.searchsorted(codes, out['StockID'].to_numpy()),
+                                               categories=[f'{x:06d}' for x in codes])
+    return out
+
+
+PANEL_COLS = ['Date', 'StockID', 'Open', 'High', 'Low', 'Close', 'Close_raw', 'adj_factor', 'adj_factor_nd',
+              'Vol', 'Vol_raw', 'Amount', 'Turnover', 'FloatShares', 'TotalShares', 'FloatMV', 'MarketCap',
+              'TotalMV', 'is_ST', 'Ret', 'Ret_nd', 'MA20', 'EWMA_vol', 'PreClose', 'LimitUp', 'LimitDown',
+              'LimitStatus', 'Markettype', 'Trdsta']
+
+
+def write_feather_consuming(df: pd.DataFrame, cols: list[str], path: str) -> None:
+    """Convert column by column, dropping each pandas column once converted, so peak memory stays ~1x."""
+    import pyarrow.feather as feather
+    if set(df.columns) != set(cols):
+        raise ValueError(f'column mismatch: {set(df.columns) ^ set(cols)}')
+    arrays = []
+    for c in cols:
+        arrays.append(pa.Array.from_pandas(df.pop(c)))
+    feather.write_feather(pa.Table.from_arrays(arrays, names=cols), path)
+
+
+def build_stock_info(root: Path, panel: pd.DataFrame) -> pd.DataFrame:
+    path = sorted(root.glob(COMPANY_ZIP_GLOB))
+    if len(path) != 1:
+        raise RuntimeError(f'expected one company zip, found {path}')
+    with zipfile.ZipFile(path[0]) as z:
+        co = pd.read_csv(z.open('TRDNEW_Co.csv'), dtype=str)
+    co = co.rename(columns={'Stkcd': 'StockID', 'Stknme': 'name', 'Listdt': 'list_date',
+                            'DelistedDate': 'delist_date', 'Nnindcd': 'industry', 'Nnindnme': 'industry_name',
+                            'Markettype': 'markettype_co'})
+    co['StockID'] = co['StockID'].str.zfill(6)
+    for c in ['list_date', 'delist_date']:
+        co[c] = pd.to_datetime(co[c], errors='coerce')
+    if co['StockID'].duplicated().any():
+        raise ValueError('TRDNEW_Co has duplicate Stkcd')
+    span = panel.groupby('StockID', observed=True)['Date'].agg(first_trade='min', last_trade='max', n_rows='size')
+    span = span.reset_index()
+    span['StockID'] = span['StockID'].astype(str)
+    info = span.merge(co[['StockID', 'name', 'list_date', 'delist_date', 'industry', 'industry_name',
+                          'markettype_co']], on='StockID', how='left', validate='one_to_one')
+    last_mt = panel.groupby('StockID', observed=True)['Markettype'].last().rename('markettype_last').reset_index()
+    last_mt['StockID'] = last_mt['StockID'].astype(str)
+    info = info.merge(last_mt, on='StockID', how='left', validate='one_to_one')
+    info['in_company_file'] = info['name'].notna()
+    info['code_history'] = ''
+    for old, new, _, _ in CODE_CHANGES:
+        old_s, new_s = f'{old:06d}', f'{new:06d}'
+        old_list = co.loc[co['StockID'] == old_s, 'list_date']
+        if len(old_list) != 1:
+            raise ValueError(f'code change {old_s}->{new_s}: old code not unique in TRDNEW_Co')
+        k = info['StockID'] == new_s
+        info.loc[k, 'list_date'] = old_list.iloc[0]
+        info.loc[k, 'code_history'] = f'{old_s}->{new_s}'
+    for c in ['industry', 'industry_name']:
+        info[c] = info[c].astype('category')
+    return info
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument('--force', action='store_true')
-    ap.add_argument('--n-jobs', type=int, default=8)
     args = ap.parse_args(argv)
     if os.path.exists(ASHARE_PANEL_PATH) and not args.force:
         logger.info(f'已存在: {ASHARE_PANEL_PATH}（--force 重建）')
         return 0
 
     t0 = time.time()
-    adj_dir, unadj_dir = Path(ASHARE_RAW_ADJ_DIR), Path(ASHARE_RAW_UNADJ_DIR)
-    files = sorted(f for f in adj_dir.glob('*.csv') if not f.stem.endswith('(1)'))
-    logger.info(f'后复权文件 {len(files)} 个；不复权目录 {unadj_dir}')
-    res = Parallel(n_jobs=args.n_jobs, batch_size=16)(delayed(read_one)(f, unadj_dir) for f in files)
-    info = pd.DataFrame([r[1] for r in res])
-    panel = pd.concat([r[0] for r in res if len(r[0])], ignore_index=True)
-    del res
-    panel['StockID'] = panel['StockID'].astype('category')
-    panel = panel.sort_values(['StockID', 'Date'], kind='stable').reset_index(drop=True)
-    logger.info(f'读入 {len(panel):,} 行，{panel["StockID"].nunique()} 只，用时 {time.time() - t0:.0f}s')
+    root = Path(CSMAR_ROOT)
+    end = pd.Timestamp(SAMPLE_END)
+    zips = sorted(root.glob(DAILY_ZIP_GLOB))
+    logger.info(f'{len(zips)} 个日行情分段: {[z.name for z in zips]}')
+    flow = dict.fromkeys(['raw', 'drop_b_share', 'drop_after_sample_end', 'drop_filling2_holiday',
+                          'drop_filling1_suspension'], 0)
+    chk: dict = {'zips': [z.name for z in zips], 'sample_end': SAMPLE_END}
+    trade, susp = [], []
+    for zp in zips:
+        a, b = read_daily_zip(zp, end, flow)
+        logger.info(f'  {zp.name}: 交易行 {len(a):,}，停牌行 {len(b):,}')
+        trade.append(a)
+        susp.append(b)
+    d = pd.concat(trade, ignore_index=True)
+    del trade
+    s = pd.concat(susp, ignore_index=True)
+    d = dedup(d, 'trading', chk)
+    s = s.drop_duplicates()
+    overlap = d[KEY].merge(s, on=KEY, how='inner')
+    chk['keys_both_trading_and_suspension'] = len(overlap)
+    if len(overlap):
+        raise ValueError(f'{len(overlap)} keys are both trading and suspension rows:\n{overlap.head(10)}')
+    flow['trading_rows_after_dedup'] = len(d)
+    d = drop_rows_without_return_fields(d, flow, chk)
+    d = apply_code_changes(d, chk)
+    flow['trading_rows_final'] = len(d)
+    logger.info(f'交易行 {len(d):,}，{d["Stkcd"].nunique()} 只，用时 {time.time() - t0:.0f}s')
 
-    panel = add_derived(panel)
-    cols = ['Date', 'StockID', 'Open', 'High', 'Low', 'Close', 'Close_raw', 'adj_factor', 'Vol', 'Vol_raw',
-            'Amount', 'Turnover', 'pct_chg', 'FloatShares', 'TotalShares', 'FloatMV', 'MarketCap', 'PE_TTM', 'PB',
-            'is_ST', 'is_limit_up', 'Ret', 'MA20', 'EWMA_vol']
-    panel = panel[cols]
+    panel = build_panel(d, chk)
+    del d
+    logger.info(f'面板构建完成，用时 {time.time() - t0:.0f}s')
     os.makedirs(ASHARE_PROCESSED_DATA_DIR, exist_ok=True)
-    panel.to_feather(ASHARE_PANEL_PATH)
-    info['industry'] = info['industry'].astype('category')
-    info.to_feather(ASHARE_STOCK_INFO_PATH)
-    logger.info(f'写出 {ASHARE_PANEL_PATH}')
 
-    chk: dict = {
-        'rows': len(panel), 'stocks': int(panel['StockID'].nunique()),
+    s = s.rename(columns={'Stkcd': 'StockID', 'Trddt': 'Date'})
+    s['StockID'] = s['StockID'].map(lambda x: f'{x:06d}')
+    s.sort_values(['StockID', 'Date']).to_parquet(
+        os.path.join(ASHARE_PROCESSED_DATA_DIR, 'suspension_days.parquet'), index=False)
+
+    info = build_stock_info(root, panel)
+    info.to_feather(ASHARE_STOCK_INFO_PATH)
+
+    pd.Series(flow, name='rows').rename_axis('step').to_csv(
+        os.path.join(ASHARE_PROCESSED_DATA_DIR, 'panel_flow.csv'))
+    chk.update({
+        'flow': flow, 'rows': len(panel), 'stocks': int(panel['StockID'].nunique()),
+        'stocks_by_last_markettype': info['markettype_last'].value_counts().sort_index().to_dict(),
+        'stocks_not_in_company_file': info.loc[~info['in_company_file'], 'StockID'].tolist(),
         'date_min': str(panel['Date'].min().date()), 'date_max': str(panel['Date'].max().date()),
         'n_market_days': int(panel['Date'].nunique()),
         'st_row_share': float(panel['is_ST'].mean()),
         'ret_abs_max': float(panel['Ret'].abs().max()),
         'ret_share_abs_gt_0.11': float((panel['Ret'].abs() > 0.11).mean()),
-        'ret_top10_abs': panel.loc[panel['Ret'].abs().nlargest(10).index, ['Date', 'StockID', 'Ret']]
-                              .astype(str).values.tolist(),
-        'stocks_empty': info.loc[info['rows'] == 0, 'StockID'].tolist(),
-        'stocks_without_unadj_file': int((~info['has_unadj']).sum()),
-        'adj_factor_missing_rows_before_fill': int(info['adj_factor_missing_rows'].sum()),
-        'adj_factor_nan_after_fill': int(panel['adj_factor'].isna().sum()),
-        'split_volume_check': split_volume_check(panel),
-    }
-    old_panel = os.path.join(PRE_CLEAN_WORK_DIR, 'data', 'ashare_processed_data', 'ashare_ret.feather')
-    if os.path.exists(old_panel):
-        old = pd.read_feather(old_panel, columns=['Date', 'StockID', 'Close', 'Vol'])
-        old['StockID'] = old['StockID'].astype(str).str.zfill(6)
-        new = panel.loc[panel['is_ST'] == 0, ['Date', 'StockID', 'Close', 'Vol_raw']].copy()
-        new['StockID'] = new['StockID'].astype(str)
-        m = old.merge(new, on=['Date', 'StockID'], how='outer', indicator=True, suffixes=('_old', '_new'))
-        both = m['_merge'] == 'both'
-        chk['vs_pre_clean_panel_nonST'] = {
-            'rows_old': len(old), 'rows_new_nonST': len(new),
-            'only_old': int((m['_merge'] == 'left_only').sum()),
-            'only_new': int((m['_merge'] == 'right_only').sum()),
-            'close_match_share_1e-9': float((np.abs(m.loc[both, 'Close_new'] / m.loc[both, 'Close_old'] - 1)
-                                             < 1e-9).mean()),
-            'vol_raw_match_share': float((m.loc[both, 'Vol_raw'] == m.loc[both, 'Vol'].astype(float)).mean()),
-        }
+    })
+    n_rows = len(panel)
+    write_feather_consuming(panel, PANEL_COLS, ASHARE_PANEL_PATH)
+    del panel
+    logger.info(f'写出 {ASHARE_PANEL_PATH}（{n_rows:,} 行）')
     Path(ASHARE_PROCESSED_DATA_DIR, 'panel_check.json').write_text(
         json.dumps(chk, indent=2, ensure_ascii=False, default=str), encoding='utf-8')
     logger.info(json.dumps(chk, indent=2, ensure_ascii=False, default=str))
