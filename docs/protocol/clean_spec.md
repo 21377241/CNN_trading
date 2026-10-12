@@ -76,8 +76,8 @@
 ### 5.1 chart-CNN
 
 - 架构不变（Jiang I20 结构，5×3 卷积核，64/128/256 通道，全连接输入 46,080）。
-- 训练流程对齐 Jiang：Adam、batch 128、交叉熵；**去掉 `ReduceLROnPlateau`**；按验证集 loss 早停并保存 loss 最优那一轮的 checkpoint。
-- 超参数：在干净数据上按 `experiments/E1_image_baseline/config_cnn_hp_ric.yaml` 的原网格（lr ∈ {3e-6, 1e-5, 3e-5, 1e-4}，dropout ∈ {0.4, 0.5, 0.6}，patience ∈ {2, 5}）和原三阶段流程重新搜参。每组的得分为“loss 最优 checkpoint 的验证集 Rank IC”，不再取各轮最大值。最终 5 个模型集成（seed 42–46），平均上涨概率。
+- 训练流程对齐 Jiang：Adam、batch 128、交叉熵；**去掉 `ReduceLROnPlateau`**；按验证集 loss 早停并保存 loss 最优那一轮的 checkpoint。（已修订：所有模型改为按验证 Rank IC 早停并保存 Rank IC 最优的 checkpoint，见第 9 节“2026-10-12 早停规则修正”。）
+- 超参数：在干净数据上按 `experiments/E1_image_baseline/config_cnn_hp_ric.yaml` 的原网格（lr ∈ {3e-6, 1e-5, 3e-5, 1e-4}，dropout ∈ {0.4, 0.5, 0.6}，patience ∈ {2, 5}）和原三阶段流程重新搜参。每组的得分为“loss 最优 checkpoint 的验证集 Rank IC”，不再取各轮最大值。最终 5 个模型集成（seed 42–46），平均上涨概率。（已修订：得分为所保存 checkpoint 的验证 Rank IC，见同一节。）
 - 日志报告训练集和验证集的上涨标签比例。
 
 ### 5.2 1D-CNN-140
@@ -108,6 +108,7 @@
 | 训练/验证切分 | 样本内随机 70/30 | 按年份：训练 2000–2005，验证 2006–2007 | 避免同一周的截面样本同时出现在训练和验证中；更保守 |
 | 像素标准化 | 训练集均值和标准差 | 除以 255 | Jiang 脚注 8：影响可以忽略；网络含 BatchNorm |
 | 超参数 | lr 1e-5、patience 2 | 按网格搜参，选择标准为验证集 Rank IC | 截面排序是本文的评价目标；网格包含 Jiang 的原设定 |
+| 早停依据（2026-10-12 补列） | 验证集 loss | 验证集 Rank IC（所有模型） | 按年份切分后训练期与验证期的上涨比例不同（47% 与 60%），验证 loss 主要反映概率水平的偏移而非排序，按 loss 早停会停在第 1–2 轮；见第 9 节“早停规则修正” |
 | ~~均线超出范围~~ | ~~未说明~~ | ~~图像中不画，数值特征保留原值~~ | ~~纵轴按 Jiang 正文只用 OHLC 定标~~（2026-10-12 删除：官方代码中均线参与纵轴定标，本文已改为一致，见第 9 节） |
 
 以下各条是 2026-10-12 与官方代码逐项对照（`docs/protocol/jkx_code_audit.md`）后补列的偏离。第 2 节 D3、D7、D8 当时写成对旧实现的修正，相对 Jiang 官方代码则属于偏离：
@@ -495,7 +496,7 @@ E2G、E3/E4/E5（含 T 版本）、E6A、E0 registry/主表脚本的默认输入
 **1. chart-CNN 最终组合**
 
 - 第 5.1 节只规定了搜参流程，没有规定第三阶段完整训练的几组中选哪一组。旧流程实际按 OOS 组合 Sharpe 比较，属于前视，已删除（见上一节第 5 项）。
-- 规则：在第三阶段完整训练的各组（第二阶段前 1–2 名，加上锚点 lr 1e-5、dropout 0.5、patience 2）中，取 5 个成员“loss 最优 checkpoint 的验证集 Rank IC”的均值，均值最高的一组即为 `chartcnn_clean`。这与第 5.1 节的试验得分定义相同。
+- 规则：在第三阶段完整训练的各组（第二阶段前 1–2 名，加上锚点 lr 1e-5、dropout 0.5、patience 2）中，取 5 个成员“loss 最优 checkpoint 的验证集 Rank IC”的均值，均值最高的一组即为 `chartcnn_clean`。这与第 5.1 节的试验得分定义相同。（已修订：checkpoint 改为按验证 Rank IC 保存，见“早停规则修正”。）
 - 选定只用验证集（2006–2007），不看任何 OOS 结果。
 
 **2. 1D-CNN-140 与 MLP-4-140**
@@ -627,8 +628,8 @@ E2G、E3/E4/E5（含 T 版本）、E6A、E0 registry/主表脚本的默认输入
 **2. 共同规则（与 chart-CNN 对称）**
 
 - 输入：140 维特征；训练 2000–2005，验证 2006–2007；剔除 embargo 周和无标签行。
-- 早停：每轮计算验证集交叉熵，创新低时保存 checkpoint，连续 patience 轮未创新低即停。MLP patience 15、最多 200 轮；1D-CNN patience 10、最多 80 轮。与 chart-CNN 一样按 loss 早停（此前数值模型按验证 Rank IC 早停）。
-- 试验得分：loss 最优 checkpoint 的验证 Rank IC（逐周截面 Spearman 的均值）。
+- 早停：每轮计算验证集交叉熵，创新低时保存 checkpoint，连续 patience 轮未创新低即停。MLP patience 15、最多 200 轮；1D-CNN patience 10、最多 80 轮。与 chart-CNN 一样按 loss 早停（此前数值模型按验证 Rank IC 早停）。（已修订：改为按验证 Rank IC 早停，patience 与最多轮数不变，见下一节“早停规则修正”。）
+- 试验得分：loss 最优 checkpoint 的验证 Rank IC（逐周截面 Spearman 的均值）。（已修订：所保存 checkpoint 的验证 Rank IC。）
 - 第一阶段：全网格，seed 42，每组 1 个模型。
 - 第二阶段：第一阶段得分前 3 名，加上锚点（若不在前 3），各训练 seed 42–46（seed 42 沿用第一阶段的模型）。
 - 选定：5 个成员验证 Rank IC 均值最高的一组；均值之差小于 1e-4 时取参数少者。另报告 5 个成员集成的验证 Rank IC，但不用于选定。
@@ -661,4 +662,44 @@ E2G、E3/E4/E5（含 T 版本）、E6A、E0 registry/主表脚本的默认输入
 - **E2G 容量对标**：ChartCNN-S、ChartCNN-M 的宽度改为分别对标选定 1D-CNN 与选定 MLP 的参数量；k 仍按参数量公式 `P(k) = 150k² + 1476k + 2` 机械选取。
 - **E2G 对称检验 1D-CNN-L**：选定 1D-CNN 的各层通道乘以同一正整数 m，m 取使参数量最接近完整 chart-CNN（708,866）的值；其余设定（层数、卷积核、dropout、学习率、早停）不变，训练 seed 42–46。
 - E7 v2、E9、E10 协议中的模型名称与设定在 C4 冻结前按选定结果更新。
+
+### 2026-10-12 早停规则修正：所有模型改为按验证 Rank IC 早停（写于重新搜参开始前；未计算任何 OOS 指标）
+
+**1. 起因**
+
+- 训练期（2000–2005）上涨标签比例 46.97%，验证期（2006–2007）60.10%（2006 年 57.96%，2007 年 61.99%）。对验证集恒定输出训练期比例，交叉熵为 0.7072，高于恒定输出 0.5 的 0.6931。验证 loss 因此主要反映模型输出的概率水平与验证期上涨比例的偏差，而不是截面排序。
+- 上一节的数值模型搜参启动后：
+  - MLP 前 5 组的 loss 最优轮全部是第 1 轮，验证 Rank IC 0.021–0.026。以第 1 组为例，16 轮中验证 loss 由 0.706 单调升到 0.779，验证 Rank IC 由 0.026 升到 0.052。
+  - 1D-CNN 第 1 组的 loss 最优轮是第 2 轮（Rank IC 0.026），而第 12 轮的 Rank IC 为 0.047。
+  - 按 loss 早停的数值模型基本没有训练，作为对照不公平。
+- 同时在跑的 chart-CNN 搜参（按 loss 早停，第 5.1 节）有同样现象：验证 loss 多在 0.69 以上且波动，第 2–4 轮即停。第一阶段 8 组已完成（最优验证 Rank IC 0.0505），第二阶段刚开始。
+
+**2. 决定**
+
+- 所有模型改为按验证 Rank IC 早停：每轮计算验证 Rank IC（逐周截面 Spearman 的均值），比此前最高值高出 1e-6 以上时保存 checkpoint，连续 patience 轮没有新高即停。试验得分为所保存 checkpoint 的验证 Rank IC。
+- 适用于 chart-CNN（第 5.1 节）、MLP-140 与 1D-CNN-140（上一节），以及 C5 的 ChartCNN-S/M、1D-CNN-L、E2F 层数稳健性。
+- 其余不变：各网格、patience（chart-CNN 第一阶段 1、网格 {2, 5}；MLP 15；1D-CNN 10）、最多轮数、三阶段与两阶段流程、选定规则。
+- 试验得分是各轮验证 Rank IC 的最大值，作为验证集表现的估计偏高。所有模型都如此，且只用于选定；OOS 评估不受影响。
+- 相对 Jiang 官方代码属于偏离，已补列在第 7 节。
+
+**3. 决定的时点与依据**
+
+- 决定时已看到的只有验证集结果：上述 MLP 5 组、1D-CNN 1 组、chart-CNN 第一阶段 8 组。未计算任何 OOS 指标。
+- 依据是对验证 loss 的诊断（训练期与验证期上涨比例不同），不是哪个模型的结果更好；规则对所有模型相同，所有试验从头重跑。
+
+**4. 作废与存档**
+
+- 按 loss 早停的 chart-CNN 搜参、数值模型搜参及其日志移入 `WORK_SPACE/paper/_sup1012/lossES/`，不用于任何比较。
+
+**5. 不受影响的部分**
+
+- M1（第 6 节）按旧训练代码（`training: legacy`，按 loss 早停，含学习率调度器）重新训练，与 M0 相同，M1 − M0 仍只反映渲染器的影响。M2 − M1 是干净流程全部改动的合计，现在也包含早停规则的改变，影响报告中注明。
+
+**6. 实现**
+
+- `cnn_experiment.py` 的 `train_us_model`、`run_cnn_trial` 增加 `monitor`（`loss` 或 `rank_ic`，`rank_ic` 只用于 `training: clean`，legacy 传入时报错）。checkpoint 记录 `monitor`；读取已有 checkpoint 时 `monitor` 不一致即报错，防止误用按 loss 训练的缓存。
+- `config_cnn_hp_clean.yaml` 增加 `monitor: rank_ic`；`3b_cnn_hp_search.py`、`3c_cnn_full_train.py` 读取该项（缺省 `loss`，M1 配置不变）。
+- `3d_numeric_hp_search.py` 的 `MONITOR = 'rank_ic'`，缓存的 `info.json` 的 `monitor` 不一致即报错。
+- 用模拟的逐轮 loss 与 Rank IC 检验：`clean` 按 `loss` 保存第 1 轮、按 `rank_ic` 保存 Rank IC 最高的第 3 轮并在其后 patience 轮停止；`legacy` 的行为与修改前相同。
+- `experiments/E2G_chart_capacity/run_e2g.py` 仍是旧数据流程，C5 改写时须使用 `training: clean`、`monitor: rank_ic` 和干净数据集。
 

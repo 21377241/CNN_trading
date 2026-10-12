@@ -1,6 +1,6 @@
 # 阶段 4a M2 / 阶段 4：干净数据上的 chart-CNN 搜参（clean_spec 5.1）。
-# 网格与三阶段流程同 config_cnn_hp_ric.yaml；training: clean（无学习率调度，保存 loss 最优 checkpoint，
-# trial 得分为 loss 最优 checkpoint 的验证 Rank IC，多 seed 取均值）；训练/验证剔除 embargo 周。
+# 网格与三阶段流程同 config_cnn_hp_ric.yaml；training: clean（无学习率调度，保存 monitor 最优 checkpoint，
+# trial 得分为该 checkpoint 的验证 Rank IC，多 seed 取均值）；训练/验证剔除 embargo 周。
 spec: I20R5_clean
 window_size: 20
 predict_window: 5
@@ -9,6 +9,8 @@ country: CHN
 
 search_metric: val_rank_ic
 training: clean
+# 早停与 checkpoint 依据验证 Rank IC（clean_spec 第 9 节 2026-10-12 早停规则修正）
+monitor: rank_ic
 run_portfolio_analysis: false
 
 train_years: [2000, 2001, 2002, 2003, 2004, 2005]

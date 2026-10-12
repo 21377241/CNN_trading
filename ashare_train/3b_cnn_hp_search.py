@@ -106,6 +106,7 @@ def _run_trial(cfg, lr, dropout, patience, train_patience, n_ensembles,
         force_retrain=force,
         search_metric=metric,
         training=cfg['training'],
+        monitor=cfg.get('monitor', 'loss'),
     )
     return _trial_row(trial_id, phase, lr, dropout, patience, train_patience, result, stage)
 
@@ -293,6 +294,7 @@ def run_phase3(cfg, dataset_dir, out_root, force: bool) -> pd.DataFrame:
             skip_oos=False,
             force_retrain=force,
             training=cfg['training'],
+            monitor=cfg.get('monitor', 'loss'),
         )
         exp_leaf = _build_exp_dir(
             model_name, ws, pw, lr, dp, freq,

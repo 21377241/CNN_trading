@@ -8,7 +8,7 @@
 
 第一阶段：全网格，seed 42。第二阶段：第一阶段验证 Rank IC 前 3 名，加上锚点（原固定设定），seed 42-46
 （seed 42 沿用第一阶段的模型）。选定：5 个成员验证 Rank IC 均值最高者，均值之差 < 1e-4 时取参数少者。
-早停按验证集交叉熵；试验得分为 loss 最优 checkpoint 的验证 Rank IC。只输出验证集指标。
+早停按验证 Rank IC；试验得分为 Rank IC 最优 checkpoint 的验证 Rank IC。只输出验证集指标。
 
 输出：WORK_SPACE/paper/hp_numeric_140/{mlp,oned}/
   trials/<名称>/models/seed<s>/   模型与 info.json
@@ -63,6 +63,7 @@ ANCHORS = {
     'oned': {'channels': (32, 64), 'dropout': 0.25, 'lr': 1e-3},
 }
 MLP_FIXED = {'max_iter': 200, 'n_iter_no_change': 15}
+MONITOR = 'rank_ic'
 PRED_TAG = {'mlp': 'mlp140', 'oned': '1dcnn140'}
 
 logger = logging.getLogger('numeric_hp')
@@ -97,7 +98,7 @@ def oned_cfg(hp: dict) -> dict:
     cfg['model']['hidden_channels'] = list(hp['channels'])
     cfg['model']['dropout'] = float(hp['dropout'])
     cfg['train']['learning_rate'] = float(hp['lr'])
-    cfg['train']['monitor'] = 'loss'
+    cfg['train']['monitor'] = MONITOR
     return cfg
 
 
@@ -106,7 +107,10 @@ def run_seed(model: str, hp: dict, seed: int, data, out_dir: str) -> dict:
     info_path = os.path.join(seed_dir, 'info.json')
     if os.path.exists(info_path):
         with open(info_path, encoding='utf-8') as f:
-            return json.load(f)
+            info = json.load(f)
+        if info.get('monitor') != MONITOR:
+            raise RuntimeError(f'{info_path} 按 monitor={info.get("monitor")} 训练，当前要求 {MONITOR}')
+        return info
     os.makedirs(seed_dir, exist_ok=True)
     X_is, y, meta_is, tr_idx, va_idx = data
     t0 = time.time()
@@ -114,7 +118,7 @@ def run_seed(model: str, hp: dict, seed: int, data, out_dir: str) -> dict:
         from experiments.E2_matched_tabular.mlp_bagging import fit_mlp_chrono_es
         pipe, info = fit_mlp_chrono_es(
             X_is[tr_idx], y[tr_idx], X_is[va_idx], y[va_idx], meta_is.iloc[va_idx].reset_index(drop=True),
-            seed=seed, hidden_layer_sizes=hp['hidden'], alpha=hp['alpha'], lr=hp['lr'], monitor='loss', **MLP_FIXED)
+            seed=seed, hidden_layer_sizes=hp['hidden'], alpha=hp['alpha'], lr=hp['lr'], monitor=MONITOR, **MLP_FIXED)
         joblib.dump(pipe, os.path.join(seed_dir, 'model.joblib'))
         pd.DataFrame(info.pop('history')).to_csv(os.path.join(seed_dir, 'history.csv'), index=False)
         info['seed'] = seed

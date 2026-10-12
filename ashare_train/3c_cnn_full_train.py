@@ -74,6 +74,7 @@ def main():
         is_years=years['train_years'], val_years=years['val_years'], oos_years=years['oos_years'],
         country=cfg.get('country', ASHARE_COUNTRY), base_exp_dir=out_root, dataset_dir=dataset_dir,
         dir_suffix=suffix, skip_oos=False, force_retrain=args.force, training=cfg['training'],
+        monitor=cfg.get('monitor', 'loss'),
     )
     exp_dir = _build_exp_dir(get_full_model_name(ws), ws, pw, lr, dp, freq, len(MA_LAGS) > 0, VOLUME_BAR,
                              base_exp_dir=out_root, dir_suffix=suffix)

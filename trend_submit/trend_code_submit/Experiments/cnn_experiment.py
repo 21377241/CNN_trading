@@ -39,15 +39,30 @@ from Model.cnn_model import init_model, get_full_model_name
 logger = logging.getLogger(__name__)
 
 # 'legacy'：旧流程（ReduceLROnPlateau；HP trial 保存验证 Rank IC 最高那一轮），仅用于复现旧结果
-# 'clean' ：clean_spec 5.1（无学习率调度；按验证 loss 早停并保存 loss 最优 checkpoint；
-#           trial 得分为 loss 最优 checkpoint 的验证 Rank IC；训练/验证用 sample_mode='train'，OOS 用 'oos'）
+# 'clean' ：clean_spec 5.1（无学习率调度；按 monitor 早停并保存 monitor 最优 checkpoint；
+#           trial 得分为该 checkpoint 的验证 Rank IC；训练/验证用 sample_mode='train'，OOS 用 'oos'）
+# monitor（仅 clean）：'loss' = 验证 loss；'rank_ic' = 验证 Rank IC（clean_spec 第 9 节 2026-10-12 修正）
 TRAINING_MODES = ('legacy', 'clean')
+MONITORS = ('loss', 'rank_ic')
 
 
 def _sample_modes(training: str) -> tuple[str, str]:
     if training not in TRAINING_MODES:
         raise ValueError(f'training 须为 {TRAINING_MODES}，得到 {training}')
     return ('legacy', 'legacy') if training == 'legacy' else ('train', 'oos')
+
+
+def _check_monitor(training: str, monitor: str) -> None:
+    if monitor not in MONITORS:
+        raise ValueError(f'monitor 须为 {MONITORS}，得到 {monitor}')
+    if training == 'legacy' and monitor != 'loss':
+        raise ValueError('legacy 训练只支持 monitor=loss')
+
+
+def _check_cached_monitor(ckpt: dict, path: str, monitor: str) -> None:
+    cached = ckpt.get('monitor', 'loss')
+    if cached != monitor:
+        raise RuntimeError(f'{path} 按 monitor={cached} 训练，当前要求 {monitor}；请换目录或 --force')
 
 
 def _dataset(years, ws, pw, freq, has_vb, ma_lags, country, dataset_dir, sample_mode) -> EquityDataset:
@@ -215,7 +230,8 @@ def train_us_model(ws_list: list = None,
                    dir_suffix: str = None,
                    skip_oos: bool = False,
                    force_retrain: bool = False,
-                   training: str = 'legacy'):
+                   training: str = 'legacy',
+                   monitor: str = 'loss'):
     """
     训练多个 (window_size, predict_window) 组合的集成 CNN 模型，并生成 OOS 预测。
 
@@ -243,8 +259,10 @@ def train_us_model(ws_list: list = None,
         skip_oos: 为 True 时不生成 OOS 预测（HP 搜索 Phase 1/2）。
         force_retrain: 为 True 时忽略已有 checkpoint 重新训练。
         training: 'legacy' | 'clean'（见 TRAINING_MODES）。
+        monitor: 'loss' | 'rank_ic'，早停与保存 checkpoint 的依据（rank_ic 仅限 clean）。
     """
     fit_mode, oos_mode = _sample_modes(training)
+    _check_monitor(training, monitor)
     ws_list  = ws_list  or [BENCHMARK_MODEL_WINDOW]
     pw_list  = pw_list  or [BENCHMARK_MODEL_PREDICT_WINDOW]
     ma_lags  = ma_lags  if ma_lags is not None else MA_LAGS
@@ -303,6 +321,7 @@ def train_us_model(ws_list: list = None,
         for ens_idx in range(n_ensembles):
             ckpt_path = os.path.join(exp_dir, f'checkpoint{ens_idx}.pth.tar')
             if os.path.exists(ckpt_path) and not force_retrain:
+                _check_cached_monitor(torch.load(ckpt_path, map_location='cpu'), ckpt_path, monitor)
                 logger.info(f"Ensemble {ens_idx}: checkpoint 已存在，跳过训练。")
                 continue
 
@@ -336,6 +355,7 @@ def train_us_model(ws_list: list = None,
             best_val_mcc = -1.0
             best_epoch = 0
             loss_best_epoch = 0
+            best_score = float('-inf')
             no_improve = 0
             best_state = None
             history = []
@@ -348,18 +368,24 @@ def train_us_model(ws_list: list = None,
                     model, val_loader, criterion, device)
                 if scheduler is not None:
                     scheduler.step(va_loss)
-                history.append({'seed': 42 + ens_idx, 'epoch': epoch, 'train_loss': tr_loss,
-                                'val_loss': va_loss, 'val_mcc': va_mcc})
+                row = {'seed': 42 + ens_idx, 'epoch': epoch, 'train_loss': tr_loss,
+                       'val_loss': va_loss, 'val_mcc': va_mcc}
+                if monitor == 'rank_ic':
+                    row['val_rank_ic'] = _eval_val_rank_ic(model, val_loader, val_meta, device)
+                history.append(row)
 
                 elapsed = time.time() - t0
                 logger.info(
                     f"Epoch {epoch:3d} | "
                     f"tr_loss={tr_loss:.4f} tr_acc={tr_acc:.3f} tr_mcc={tr_mcc:.3f} | "
-                    f"va_loss={va_loss:.4f} va_acc={va_acc:.3f} va_mcc={va_mcc:.3f} | "
-                    f"{elapsed:.1f}s"
+                    f"va_loss={va_loss:.4f} va_acc={va_acc:.3f} va_mcc={va_mcc:.3f}"
+                    + (f" va_rank_ic={row['val_rank_ic']:.4f}" if monitor == 'rank_ic' else '')
+                    + f" | {elapsed:.1f}s"
                 )
 
-                if va_loss < best_val_loss - 1e-6:
+                score = row['val_rank_ic'] if monitor == 'rank_ic' else -va_loss
+                if score > best_score + 1e-6:
+                    best_score = score
                     best_val_loss = va_loss
                     loss_best_epoch = epoch
                     no_improve = 0
@@ -373,7 +399,7 @@ def train_us_model(ws_list: list = None,
                     best_val_mcc = va_mcc
                     best_epoch = epoch
 
-            # 保存 checkpoint（两种 training 都保存 loss 最优的权重）
+            # 保存 checkpoint（monitor 最优的权重；legacy 与 monitor=loss 时即 loss 最优）
             if best_state is not None:
                 model.load_state_dict(best_state)
                 val_ric = _eval_val_rank_ic(model, val_loader, val_meta, device)
@@ -384,6 +410,7 @@ def train_us_model(ws_list: list = None,
                             'val_mcc': best_val_mcc,
                             'val_rank_ic': val_ric,
                             'training': training,
+                            'monitor': monitor,
                             'seed': 42 + ens_idx,
                             'window_size': ws,
                             'predict_window': pw,
@@ -393,7 +420,7 @@ def train_us_model(ws_list: list = None,
                            ckpt_path)
                 pd.DataFrame(history).to_csv(os.path.join(exp_dir, f'history_seed{42 + ens_idx}.csv'),
                                              index=False)
-                logger.info(f"Checkpoint 保存至: {ckpt_path}（loss 最优轮 {loss_best_epoch}，"
+                logger.info(f"Checkpoint 保存至: {ckpt_path}（{monitor} 最优轮 {loss_best_epoch}，"
                             f"验证 Rank IC {val_ric:.4f}）")
 
         # ── OOS 预测 ──
@@ -441,14 +468,16 @@ def run_cnn_trial(
     channels: list[int] | tuple[int, ...] | None = None,
     save_history: bool = False,
     training: str = 'legacy',
+    monitor: str = 'loss',
 ) -> dict:
     """单次 HP trial：chrono val 训练，不写 OOS。返回 val 指标。
 
-    Early stop 用 val_loss；跨 trial 选参默认用 best_val_rank_ic：
+    Early stop 用 monitor（legacy 只能是 val_loss）；跨 trial 选参默认用 best_val_rank_ic：
       legacy：各轮验证 Rank IC 的最大值（并保存该轮权重）
-      clean ：loss 最优 checkpoint 的验证 Rank IC（多个 seed 时取均值）
+      clean ：monitor 最优 checkpoint 的验证 Rank IC（多个 seed 时取均值）
     """
     fit_mode, _ = _sample_modes(training)
+    _check_monitor(training, monitor)
     ma_lags = ma_lags if ma_lags is not None else MA_LAGS
     device = _get_device()
     img_h = IMAGE_HEIGHT.get(ws, 64)
@@ -491,6 +520,7 @@ def run_cnn_trial(
         ckpt_path = os.path.join(exp_dir, f'checkpoint{ens_idx}.pth.tar')
         if os.path.exists(ckpt_path) and not force_retrain:
             ckpt = torch.load(ckpt_path, map_location='cpu')
+            _check_cached_monitor(ckpt, ckpt_path, monitor)
             trial_best_mcc = max(trial_best_mcc, float(ckpt.get('val_mcc', -1.0)))
             trial_best_loss = min(trial_best_loss, float(ckpt.get('val_loss', float('inf'))))
             ric = ckpt.get('val_rank_ic', None)
@@ -525,8 +555,9 @@ def run_cnn_trial(
         best_val_mcc = -1.0
         best_val_rank_ic = float('-inf')
         best_epoch = 0
+        best_score = float('-inf')
         no_improve = 0
-        best_state = None  # by early-stop loss
+        best_state = None  # by early-stop monitor
         loss_best_epoch = 0
         loss_best_ric = float('nan')
         best_ric_state = None
@@ -553,7 +584,9 @@ def run_cnn_trial(
                 f"va_rank_ic={va_ric:.4f}"
             )
 
-            if va_loss < best_val_loss - 1e-6:
+            score = va_ric if monitor == 'rank_ic' else -va_loss
+            if score > best_score + 1e-6:
+                best_score = score
                 best_val_loss = va_loss
                 loss_best_epoch = epoch
                 loss_best_ric = va_ric
@@ -598,6 +631,7 @@ def run_cnn_trial(
                 'search_metric': search_metric,
                 'channels': list(channels) if channels is not None else None,
                 'training': training,
+                'monitor': monitor,
                 'seed': ens_seed_base + ens_idx,
             }, ckpt_path)
         if save_history or training == 'clean':
@@ -630,6 +664,7 @@ def run_cnn_trial(
         'dir_suffix': dir_suffix or '',
         'search_metric': search_metric,
         'training': training,
+        'monitor': monitor,
         'train_up_share': is_dataset.up_share,
         'val_up_share': val_dataset.up_share,
     }
