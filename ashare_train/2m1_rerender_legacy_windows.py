@@ -8,7 +8,8 @@
   - 均线：调整后 Close 的 rolling(20, min_periods=1)（窗口内累计均线）
   - 成交量：原始 Vol
 先用旧画法（bar_style='legacy_candle'）抽样重画并与旧 .dat 逐字节比对，必须完全一致；
-再用 render_ohlc_batch 重画全部样本，写入 I20R5_rendfix，labels 原样复制。
+再用 render_ohlc_batch 重画全部样本，写入 I20R5_rendfix，labels 原样复制；同一抽样与 Jiang 官方 DrawOHLC
+（Data/jkx_chart_library.py）逐像素比对，必须完全一致。
 
 用法:
   python ashare_train/2m1_rerender_legacy_windows.py
@@ -34,6 +35,7 @@ if CODE_PKG not in sys.path:
 from Misc.config import ASHARE_COUNTRY, OLD_DATA_WORK_DIR, PRE_CLEAN_WORK_DIR, MA_LAGS, VOLUME_BAR
 from Data.dgp_config import get_dataset_dir, get_dataset_filename
 from Data.chart_library import DrawOHLC
+from Data.jkx_chart_library import DrawOHLC as JkxDrawOHLC
 from Data.ohlc_render import render_ohlc_batch
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
@@ -94,6 +96,13 @@ def legacy_draw(w: dict, i: int) -> np.ndarray:
                     chart_type='bar', bar_style='legacy_candle').draw_to_array()
 
 
+def official_draw(w: dict, i: int) -> np.ndarray | None:
+    df = pd.DataFrame({k: v[i] for k, v in w.items()})
+    df['Vol'] = df['Vol'].where(df['Vol'] > 0)
+    img = JkxDrawOHLC(df, has_volume_bar=VOLUME_BAR, ma_lags=MA_LAGS).draw_image()
+    return None if img is None else np.asarray(img, dtype=np.uint8).reshape(-1)
+
+
 def process_year(year: int, panel, key, codes, cats, n_check: int, rng, force: bool) -> dict | None:
     fn_img = get_dataset_filename(WS, FREQ, VOLUME_BAR, MA_LAGS, year, '_images.dat')
     fn_lbl = get_dataset_filename(WS, FREQ, VOLUME_BAR, MA_LAGS, year, '_labels.feather')
@@ -119,20 +128,24 @@ def process_year(year: int, panel, key, codes, cats, n_check: int, rng, force: b
                            f'例如行 {bad.tolist()}')
 
     img = render_ohlc_batch(w['Open'], w['High'], w['Low'], w['Close'], w['ma20'], w['Vol'], has_volume=VOLUME_BAR)
+    off = np.array([np.array_equal(official_draw(w, i), img[i].reshape(-1)) for i in check])
+    if not off.all():
+        bad = check[~off][:5]
+        raise RuntimeError(f'{year}: 新图像与官方 DrawOHLC 不一致 {int((~off).sum())}/{len(check)}，例如行 {bad.tolist()}')
     mm = np.memmap(out_img, dtype=np.uint8, mode='w+', shape=(n, img.shape[1] * img.shape[2]))
     mm[:] = img.reshape(n, -1)
     mm.flush()
     del mm
     shutil.copy2(old_lbl, out_lbl)
 
-    lo = np.minimum.reduce([w['Low'], w['Open'], w['Close']]).min(axis=1, keepdims=True)
-    hi = np.maximum.reduce([w['High'], w['Open'], w['Close']]).max(axis=1, keepdims=True)
-    ma_out = float(((w['ma20'] < lo) | (w['ma20'] > hi)).mean())
+    lo = np.minimum.reduce([w['Low'], w['Open'], w['Close']]).min(axis=1)
+    hi = np.maximum.reduce([w['High'], w['Open'], w['Close']]).max(axis=1)
+    ma_bound = float(((w['ma20'].max(axis=1) > hi) | (w['ma20'].min(axis=1) < lo)).mean())
     pix_diff = float((img.reshape(n, -1)[check] != old[check]).mean())
-    logger.info(f'{year}: {n} 个样本，抽查 {len(check)} 个旧画法完全一致；均线超出 OHLC 范围的点占比 {ma_out:.4f}；'
-                f'新旧图像像素差异占比 {pix_diff:.4f}')
-    return {'year': year, 'n': n, 'n_checked': int(len(check)), 'legacy_identical': True,
-            'ma_out_of_range_share': ma_out, 'new_vs_old_pixel_diff_share': pix_diff}
+    logger.info(f'{year}: {n} 个样本，抽查 {len(check)} 个旧画法、官方画法均完全一致；均线决定纵轴上下界的窗口占比 '
+                f'{ma_bound:.4f}；新旧图像像素差异占比 {pix_diff:.4f}')
+    return {'year': year, 'n': n, 'n_checked': int(len(check)), 'legacy_identical': True, 'official_identical': True,
+            'ma_sets_price_bound_share': ma_bound, 'new_vs_old_pixel_diff_share': pix_diff}
 
 
 def main():
