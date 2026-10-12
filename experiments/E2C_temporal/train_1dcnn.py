@@ -66,18 +66,19 @@ class SeqDataset(Dataset):
 
 
 class Conv1DTemporal(nn.Module):
-    """20x6 -> Conv1D(6,32,k=3) -> ReLU -> Conv1D(32,64,k=3) -> GAP -> Linear."""
+    """(C, 20) -> [Conv1D(k) -> BN -> ReLU] x len(hidden_channels) -> GAP -> Dropout -> Linear."""
 
     def __init__(self, in_channels: int = 6, hidden_channels=(32, 64), kernel_size: int = 3, dropout: float = 0.25):
         super().__init__()
-        h1, h2 = hidden_channels
         pad = kernel_size // 2
-        self.conv1 = nn.Conv1d(in_channels, h1, kernel_size=kernel_size, padding=pad)
-        self.bn1 = nn.BatchNorm1d(h1)
-        self.conv2 = nn.Conv1d(h1, h2, kernel_size=kernel_size, padding=pad)
-        self.bn2 = nn.BatchNorm1d(h2)
+        self.n_layers = len(hidden_channels)
+        prev = in_channels
+        for i, h in enumerate(hidden_channels, start=1):
+            setattr(self, f'conv{i}', nn.Conv1d(prev, h, kernel_size=kernel_size, padding=pad))
+            setattr(self, f'bn{i}', nn.BatchNorm1d(h))
+            prev = h
         self.dropout = nn.Dropout(dropout)
-        self.fc = nn.Linear(h2, 1)
+        self.fc = nn.Linear(prev, 1)
         self.apply(self._init)
 
     @staticmethod
@@ -88,8 +89,8 @@ class Conv1DTemporal(nn.Module):
                 nn.init.zeros_(m.bias)
 
     def forward(self, x):
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = F.relu(self.bn2(self.conv2(x)))
+        for i in range(1, self.n_layers + 1):
+            x = F.relu(getattr(self, f'bn{i}')(getattr(self, f'conv{i}')(x)))
         x = x.mean(dim=-1)
         x = self.dropout(x)
         return self.fc(x).squeeze(-1)
@@ -174,8 +175,11 @@ def fit_seed(cfg: dict, seed: int, X_is: np.ndarray, y_is: np.ndarray, meta_is: 
     max_epochs = int(train_cfg.get('max_epochs', 80))
     patience = int(train_cfg.get('patience', 10))
     monitor = str(train_cfg.get('monitor', 'rank_ic'))
+    if monitor not in ('rank_ic', 'auc', 'loss'):
+        raise ValueError(f'unknown monitor {monitor}')
     best_score = -np.inf
     best_epoch = -1
+    best_val = None
     bad = 0
     history = []
     seed_dir = os.path.join(out_root, 'models', f'seed{seed}')
@@ -199,7 +203,7 @@ def fit_seed(cfg: dict, seed: int, X_is: np.ndarray, y_is: np.ndarray, meta_is: 
             n += len(yb)
 
         val = evaluate(model, val_loader, meta_is.iloc[va_idx].reset_index(drop=True), device)
-        score = val.rank_ic if monitor == 'rank_ic' else val.auc
+        score = {'rank_ic': val.rank_ic, 'auc': val.auc, 'loss': -val.loss}[monitor]
         row = {
             'epoch': epoch,
             'train_loss': total_loss / max(1, n),
@@ -210,11 +214,12 @@ def fit_seed(cfg: dict, seed: int, X_is: np.ndarray, y_is: np.ndarray, meta_is: 
         history.append(row)
         logger.info(
             f'seed={seed} epoch={epoch:03d} train_loss={row["train_loss"]:.5f} '
-            f'val_auc={val.auc:.4f} val_rank_ic={val.rank_ic:.5f}'
+            f'val_loss={val.loss:.5f} val_auc={val.auc:.4f} val_rank_ic={val.rank_ic:.5f}'
         )
         if np.isfinite(score) and score > best_score:
             best_score = float(score)
             best_epoch = epoch
+            best_val = val
             bad = 0
             torch.save({'model': model.state_dict(), 'mean': mean, 'std': std, 'cfg': cfg, 'seed': seed}, ckpt_path)
         else:
@@ -225,7 +230,11 @@ def fit_seed(cfg: dict, seed: int, X_is: np.ndarray, y_is: np.ndarray, meta_is: 
 
     hist_df = pd.DataFrame(history)
     hist_df.to_csv(os.path.join(seed_dir, 'history.csv'), index=False)
-    info = {'seed': seed, 'best_epoch': best_epoch, 'best_score': best_score, 'monitor': monitor}
+    info = {'seed': seed, 'best_epoch': best_epoch, 'best_score': best_score, 'monitor': monitor,
+            'stopped_epoch': int(history[-1]['epoch']) if history else 0,
+            'best_val_loss': float(best_val.loss) if best_val else float('nan'),
+            'best_val_rank_ic': float(best_val.rank_ic) if best_val else float('nan'),
+            'n_parameters': int(sum(p.numel() for p in model.parameters()))}
     with open(os.path.join(seed_dir, 'info.json'), 'w', encoding='utf-8') as f:
         json.dump(info, f, indent=2)
     return info

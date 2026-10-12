@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import log_loss, roc_auc_score
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -92,16 +92,25 @@ def fit_mlp_chrono_es(
         random_state=seed,
         shuffle=True,
     )
+    if monitor not in ('rank_ic', 'auc', 'loss'):
+        raise ValueError(f'unknown monitor {monitor}')
     best_score, best_state, best_epoch, patience = -np.inf, None, 0, 0
+    best_row = {}
     history = []
     for epoch in range(1, max_iter + 1):
         clf.fit(X_tr_s, y_tr)
         col = list(clf.classes_).index(1)
         p_va = clf.predict_proba(X_va_s)[:, col]
-        score = float(roc_auc_score(y_va, p_va)) if monitor == 'auc' else _rank_ic(meta_va, p_va)
-        history.append({'epoch': epoch, 'val_score': score})
+        row = {'epoch': epoch, 'val_loss': float(log_loss(y_va, np.clip(p_va, 1e-7, 1 - 1e-7), labels=[0, 1])),
+               'val_rank_ic': _rank_ic(meta_va, p_va)}
+        if monitor == 'auc':
+            row['val_auc'] = float(roc_auc_score(y_va, p_va))
+        score = {'rank_ic': row['val_rank_ic'], 'loss': -row['val_loss']}.get(monitor, row.get('val_auc'))
+        row['val_score'] = score
+        history.append(row)
         if score > best_score + 1e-6:
             best_score, best_state, best_epoch, patience = score, _clone_weights(clf), epoch, 0
+            best_row = row
         else:
             patience += 1
             if patience >= n_iter_no_change:
@@ -114,7 +123,10 @@ def fit_mlp_chrono_es(
     return Pipeline([('scaler', scaler), ('clf', clf)]), {
         'best_epoch': best_epoch,
         'best_val_score': float(best_score),
+        'best_val_loss': float(best_row.get('val_loss', np.nan)),
+        'best_val_rank_ic': float(best_row.get('val_rank_ic', np.nan)),
         'stopped_epoch': int(history[-1]['epoch']) if history else 0,
+        'n_parameters': int(sum(c.size for c in clf.coefs_) + sum(b.size for b in clf.intercepts_)),
         'monitor': monitor,
         'history': history,
     }

@@ -40,7 +40,7 @@ OOS_START, OOS_END = pd.Timestamp('2008-01-01'), pd.Timestamp('2026-09-30')
 REGISTRY_V2 = PROJECT_ROOT / 'WORK_SPACE' / 'paper' / 'registry_v2.json'
 SCORES = ['s_chart', 's_1d', 's_mlp4']
 CHART_S = 's_chartS'
-REGISTRY_NAMES = {'s_chart': 'chartcnn_clean', 's_1d': 'onedcnn_140', 's_mlp4': 'mlp4_140', CHART_S: 'chartcnn_s'}
+REGISTRY_NAMES = {'s_chart': 'chartcnn_clean', 's_1d': 'onedcnn_140', 's_mlp4': 'mlp_140', CHART_S: 'chartcnn_s'}
 
 
 def _registry() -> dict:
