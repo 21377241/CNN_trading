@@ -23,7 +23,7 @@ import pandas as pd
 
 from Data.dgp_config import (
     BAR_WIDTH, IMAGE_WIDTH, IMAGE_HEIGHT,
-    VOLUME_CHART_GAP, VOLUME_CHART_HEIGHT_RATIO,
+    LEGACY_VOLUME_CHART_GAP, VOLUME_CHART_HEIGHT_RATIO,
     BACKGROUND_COLOR, CHART_COLOR
 )
 from Data.ohlc_render import render_ohlc_batch
@@ -69,10 +69,10 @@ class DrawOHLC:
         self.img_width = img_width or IMAGE_WIDTH.get(window_size, window_size * BAR_WIDTH)
         self.img_height = img_height or IMAGE_HEIGHT.get(window_size, 64)
 
-        # 计算价格区与成交量区的像素分配
+        # 旧画法的价格区与成交量区像素分配（'ohlc' 画法的布局见 Data/ohlc_render.layout）
         if self.has_volume_bar:
             vol_h = max(4, int(self.img_height * VOLUME_CHART_HEIGHT_RATIO))
-            gap = VOLUME_CHART_GAP
+            gap = LEGACY_VOLUME_CHART_GAP
             self.price_h = self.img_height - vol_h - gap
             self.vol_h = vol_h
             self.vol_gap = gap

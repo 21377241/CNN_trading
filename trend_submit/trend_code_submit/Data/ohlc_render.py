@@ -1,22 +1,28 @@
 # -*- coding: utf-8 -*-
 """
-Data/ohlc_render.py - Jiang, Kelly and Xiu (2023) OHLC 图像的批量渲染（numpy）
+Data/ohlc_render.py - Jiang, Kelly and Xiu (2023) OHLC 图像的批量渲染
 
-每天 3 列：左列开盘价刻度、中列高低价竖线、右列收盘价刻度；均线点与成交量柱画在中列。
-价格区纵轴按有交易日的 OHLC 最高/最低价定标，价格到像素四舍五入；超出该范围的均线点不画，
-均线只在相邻两天都可画时连线。缺失日（OHLC 任一为 NaN）三列留空。
+与原作者的 DrawOHLC（Data/jkx_chart_library.py）逐像素相同（tests/test_chart_library.py 检查）：
+- 纵轴：O/H/L/C 与均线一起取最小、最大值定标；y = np.around((p − min) × (价格区行数 − 1) / (max − min))，
+  在“底部为 0”的坐标中取整（.5 取偶），再上下翻转；
+- 64 行 = 价格区 51 行 + 间隔 1 行 + 成交量区 12 行；
+- 每天 3 列：开盘刻度画在左列和中列，高低价竖线在中列，收盘刻度在右列；高或低缺失的日子不画；
+- 均线：相邻两天都有值时用 PIL 连线，另画最后一天的点；
+- 成交量：柱高 np.around(V × 12 / Vmax) 像素，至少 1 像素；缺失或非正的成交量不画。
+价格区间为零（最大 = 最小）的窗口原作者不生成图像，这里报错，由 universe 事先剔除。
 """
 from __future__ import annotations
 
 import numpy as np
+from PIL import Image, ImageDraw
 
-from Data.dgp_config import IMAGE_HEIGHT, VOLUME_CHART_GAP, VOLUME_CHART_HEIGHT_RATIO, CHART_COLOR
+from Data.dgp_config import IMAGE_HEIGHT, VOLUME_CHART_GAP, CHART_COLOR
 
 
 def layout(window: int, has_volume: bool = True) -> dict:
     h = IMAGE_HEIGHT.get(window, 64)
     if has_volume:
-        vol_h = max(4, int(h * VOLUME_CHART_HEIGHT_RATIO))
+        vol_h = int(h / 5)
         price_h = h - vol_h - VOLUME_CHART_GAP
         vol_top, vol_bottom = price_h + VOLUME_CHART_GAP, h - 1
     else:
@@ -24,22 +30,42 @@ def layout(window: int, has_volume: bool = True) -> dict:
     return {'height': h, 'width': 3 * window, 'price_h': price_h, 'vol_top': vol_top, 'vol_bottom': vol_bottom}
 
 
-def _round(x):
-    return np.floor(x + 0.5)
+def price_bounds(O, H, L, C, MA=None) -> tuple[np.ndarray, np.ndarray]:
+    """每个窗口 O/H/L/C/MA 中有限值的最小、最大值；没有有限值时为 NaN。"""
+    arrs = [np.asarray(a, dtype=np.float64) for a in (O, H, L, C)]
+    if MA is not None:
+        arrs.append(np.asarray(MA, dtype=np.float64))
+    stack = np.stack(arrs)
+    ok = np.isfinite(stack)
+    lo = np.where(ok, stack, np.inf).min(axis=(0, 2))
+    hi = np.where(ok, stack, -np.inf).max(axis=(0, 2))
+    none = ~ok.any(axis=(0, 2))
+    return np.where(none, np.nan, lo), np.where(none, np.nan, hi)
 
 
-def price_bounds(O, H, L, C) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    valid = np.isfinite(O) & np.isfinite(H) & np.isfinite(L) & np.isfinite(C)
-    stack = np.stack([O, H, L, C])
-    lo = np.where(valid, stack, np.inf).min(axis=(0, 2))
-    hi = np.where(valid, stack, -np.inf).max(axis=(0, 2))
-    return lo, hi, valid
+def _draw_ma(ma: np.ndarray, y: np.ndarray, ph: int, width: int, color: int) -> np.ndarray:
+    """PIL 画均线，返回 (N, ph, width) 的布尔数组（已上下翻转）。每个窗口占画布中一段高 ph 的条带。"""
+    N, T = ma.shape
+    ok = np.isfinite(ma)
+    canvas = Image.new('L', (width, ph * N), 0)
+    draw = ImageDraw.Draw(canvas)
+    xs = 3 * np.arange(T) + 1
+    seg = ok[:, :-1] & ok[:, 1:]
+    for n, t in zip(*np.nonzero(seg)):
+        off = ph * int(n)
+        draw.line((int(xs[t]), off + int(y[n, t]), int(xs[t + 1]), off + int(y[n, t + 1])), width=1, fill=color)
+    px = canvas.load()
+    for n in np.flatnonzero(ok[:, -1]):
+        px[int(xs[-1]), ph * int(n) + int(y[n, -1])] = color
+    arr = np.asarray(canvas, dtype=np.uint8).reshape(N, ph, width)
+    return arr[:, ::-1, :] > 0
 
 
 def render_ohlc_batch(O, H, L, C, MA=None, V=None, has_volume: bool = True,
                       color: int = CHART_COLOR) -> np.ndarray:
     """O/H/L/C/MA/V: (N, T)；返回 uint8 (N, height, 3T)。"""
     O, H, L, C = (np.asarray(a, dtype=np.float64) for a in (O, H, L, C))
+    MA = None if MA is None else np.asarray(MA, dtype=np.float64)
     N, T = C.shape
     lay = layout(T, has_volume and V is not None)
     ph = lay['price_h']
@@ -47,57 +73,51 @@ def render_ohlc_batch(O, H, L, C, MA=None, V=None, has_volume: bool = True,
     if N == 0:
         return img
 
-    lo, hi, valid = price_bounds(O, H, L, C)
-    has_any = valid.any(axis=1)
-    lo = np.where(has_any, lo, 0.0)
-    hi = np.where(has_any, hi, 1.0)
-    rng = hi - lo
-    rng = np.where(rng < 1e-10, 1e-10, rng)
+    lo, hi = price_bounds(O, H, L, C, MA)
+    bad = ~np.isfinite(lo) | ~(hi > lo)
+    if bad.any():
+        raise ValueError(f'{int(bad.sum())} 个窗口没有价格或价格区间为零（原作者不生成图像）')
+    ppu = (ph - 1.0) / (hi - lo)
 
-    def to_y(p):
-        return _round((1.0 - (p - lo[:, None]) / rng[:, None]) * (ph - 1))
+    def to_row(p):
+        y = np.around((p - lo[:, None]) * ppu[:, None])
+        return (ph - 1) - np.nan_to_num(y, nan=0).astype(np.int64), y
 
-    yO, yH, yL, yC = (np.clip(np.nan_to_num(to_y(a), nan=0), 0, ph - 1).astype(np.int64) for a in (O, H, L, C))
+    rH, yH = to_row(H)
+    rL, yL = to_row(L)
+    rO, yO = to_row(O)
+    rC, yC = to_row(C)
+    bar_ok = np.isfinite(yH) & np.isfinite(yL)
     rows = np.arange(ph)
     for t in range(T):
-        idx = np.flatnonzero(valid[:, t])
+        idx = np.flatnonzero(bar_ok[:, t])
         if len(idx) == 0:
             continue
-        img[idx, yO[idx, t], 3 * t] = color
-        img[idx, yC[idx, t], 3 * t + 2] = color
-        bar = (rows[None, :] >= yH[idx, t, None]) & (rows[None, :] <= yL[idx, t, None])
+        bar = (rows[None, :] >= rH[idx, t, None]) & (rows[None, :] <= rL[idx, t, None])
         img[idx, :ph, 3 * t + 1] = np.where(bar, color, img[idx, :ph, 3 * t + 1])
+        io = idx[np.isfinite(yO[idx, t])]
+        img[io, rO[io, t], 3 * t] = color
+        img[io, rO[io, t], 3 * t + 1] = color
+        ic = idx[np.isfinite(yC[idx, t])]
+        img[ic, rC[ic, t], 3 * t + 2] = color
 
     if MA is not None:
-        MA = np.asarray(MA, dtype=np.float64)
-        ok = valid & np.isfinite(MA) & (MA >= lo[:, None]) & (MA <= hi[:, None])
-        yM = np.clip(np.nan_to_num(to_y(MA), nan=0), 0, ph - 1).astype(np.int64)
-        for t in range(T):
-            idx = np.flatnonzero(ok[:, t])
-            img[idx, yM[idx, t], 3 * t + 1] = color
-        for t in range(T - 1):
-            idx = np.flatnonzero(ok[:, t] & ok[:, t + 1])
-            if len(idx) == 0:
-                continue
-            y0 = yM[idx, t].astype(np.float64)
-            dy = yM[idx, t + 1] - y0
-            steps = np.maximum(3.0, np.abs(dy))
-            for k in range(int(steps.max()) + 1):
-                kk = np.minimum(k, steps)
-                x = 3 * t + 1 + _round(kk * 3.0 / steps).astype(np.int64)
-                y = _round(y0 + kk * dy / steps).astype(np.int64)
-                img[idx, y, x] = color
+        yM = np.nan_to_num(np.around((MA - lo[:, None]) * ppu[:, None]), nan=0).astype(np.int64)
+        lit = _draw_ma(MA, yM, ph, lay['width'], color)
+        img[:, :ph, :][lit] = color
 
     if lay['vol_top'] is not None:
-        V = np.where(valid, np.asarray(V, dtype=np.float64), np.nan)
+        V = np.asarray(V, dtype=np.float64)
+        V = np.where(np.isfinite(V) & (V > 0), V, np.nan)
         vmax = np.nanmax(np.where(np.isfinite(V), V, -np.inf), axis=1)
-        span = lay['vol_bottom'] - lay['vol_top']
+        vol_h = lay['vol_bottom'] - lay['vol_top'] + 1
         vrows = np.arange(lay['vol_top'], lay['vol_bottom'] + 1)
         for t in range(T):
-            idx = np.flatnonzero(np.isfinite(V[:, t]) & (vmax > 1e-10))
+            idx = np.flatnonzero(np.isfinite(V[:, t]) & (vmax > 0))
             if len(idx) == 0:
                 continue
-            bar_h = np.maximum(1, (V[idx, t] / vmax[idx] * span).astype(np.int64))
-            bar = vrows[None, :] >= (lay['vol_bottom'] - bar_h)[:, None]
+            ppv = 1.0 * vol_h / vmax[idx]
+            bar_h = np.maximum(1, np.around(V[idx, t] * ppv).astype(np.int64))
+            bar = vrows[None, :] > (lay['vol_bottom'] - bar_h)[:, None]
             img[idx, lay['vol_top']:, 3 * t + 1] = np.where(bar, color, 0).astype(np.uint8)
     return img

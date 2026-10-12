@@ -7,6 +7,7 @@ check_clean_inputs.py - 干净版本数据与输入的验收（plan 阶段 2、3
   B. 样本键：universe = 图像 labels（逐年拼接）= 特征 meta（行序相同）
   C. 像素一致：由 140 维特征推出的开/收盘刻度行、高低竖线、成交量柱高与图像像素一致
   D. 持有期内被标为 ST 的股票-周出现在 OOS universe 中且有标签
+  E. 官方渲染器：A 中独立重建的窗口交给 Jiang 官方 DrawOHLC（Data/jkx_chart_library.py）重画，与已存图像逐像素比对
 只读 CSMAR 构建的产物；与旧数据的对账见 reconcile_pre_clean.py。
 
 输出：WORK_SPACE/paper/clean_inputs/checks/clean_inputs_check.json
@@ -31,6 +32,7 @@ from Misc.config import (  # noqa: E402
 )
 from Data.clean_window import FEATURE_NAMES  # noqa: E402
 from Data.dgp_config import get_dataset_dir, get_dataset_filename  # noqa: E402
+from Data.jkx_chart_library import DrawOHLC as JkxDrawOHLC  # noqa: E402
 from Data.ohlc_render import layout  # noqa: E402
 
 OUT_DIR = os.path.join(CLEAN_INPUTS_DIR, 'checks')
@@ -45,16 +47,22 @@ def fn(year, suffix):
 
 def check_universe_independent(uni) -> dict:
     """Recompute the universe from the panel with a dense (market day x stock) grid instead of build_universe's
-    sorted-key search: signal dates, the five sample conditions, n_obs_in_win and ret_label. Delisting consolidation
+    sorted-key search: signal dates, the six sample conditions, n_obs_in_win and ret_label. Delisting consolidation
     is folded into the ST grid: for stocks whose name contains 退, the trading days after the last untraded market
     day before the final trade, if at most 30."""
-    p = pd.read_feather(ASHARE_PANEL_PATH, columns=['Date', 'StockID', 'Close', 'is_ST', 'Vol_raw', 'Markettype'])
+    p = pd.read_feather(ASHARE_PANEL_PATH, columns=['Date', 'StockID', 'Close', 'is_ST', 'Vol_raw', 'Markettype',
+                                                    'Open', 'High', 'Low', 'MA20'])
     cal = pd.DatetimeIndex(np.sort(p['Date'].unique()))
     stocks = pd.Index(p['StockID'].astype(str).unique()).sort_values()
     di, si = cal.get_indexer(p['Date']), stocks.get_indexer(p['StockID'].astype(str))
     shape = (len(cal), len(stocks))
     C = np.full(shape, np.nan)
     C[di, si] = p['Close'].to_numpy()
+    px = p[['Open', 'High', 'Low', 'Close', 'MA20']]
+    pmax, pmin = np.full(shape, np.nan), np.full(shape, np.nan)
+    pmax[di, si] = px.max(axis=1).to_numpy()
+    pmin[di, si] = px.min(axis=1).to_numpy()
+    del px
     st = np.zeros(shape, dtype=bool)
     st[di, si] = p['is_ST'].to_numpy() == 1
     zero = np.zeros(shape, dtype=bool)
@@ -86,7 +94,9 @@ def check_universe_independent(uni) -> dict:
         lo = max(t - 19, 0)
         n_obs = ctr[t + 1] - ctr[lo]
         nz = cz[t + 1] - cz[lo]
-        ok = traded[t] & (C[t] > 0) & ~st[t] & (first <= t - 39) & (nz == 0)
+        wmax, wmin = np.fmax.reduce(pmax[lo:t + 1], axis=0), np.fmin.reduce(pmin[lo:t + 1], axis=0)
+        flat = (wmax - wmin) <= 1e-10 * wmax
+        ok = traded[t] & (C[t] > 0) & ~st[t] & (first <= t - 39) & (nz == 0) & ~flat
         s_idx = np.flatnonzero(ok)
         nxt = sig[j + 1]
         rows.append(pd.DataFrame({'StockID': stocks[s_idx], 'ending_date': cal[t], 'n_obs_in_win': n_obs[s_idx],
@@ -105,9 +115,10 @@ def check_universe_independent(uni) -> dict:
     }
 
 
-def check_features_independent(uni, n_sample=40_000, seed=0) -> dict:
+def check_features_independent(uni, n_sample=40_000, n_official=10_000, seed=0) -> tuple[dict, dict]:
     """Recompute the 140 features of sampled universe rows directly from panel rows (pandas merge on the 20 market
-    days of the window), then compare with X_is / X_oos."""
+    days of the window), then compare with X_is / X_oos. The first n_official rebuilt windows are also redrawn with
+    the official DrawOHLC and compared with the stored images (check E)."""
     rng = np.random.default_rng(seed)
     uni = uni.reset_index(drop=True)
     is_rows = np.flatnonzero(uni['year'].to_numpy() < 2008)
@@ -127,14 +138,14 @@ def check_features_independent(uni, n_sample=40_000, seed=0) -> dict:
     c0 = np.array([row[v][0] for row, v in zip(a['Close'], valid)])[:, None]
     O, H, L, Cc, MA = (a[c] / c0 for c in ('Open', 'High', 'Low', 'Close', 'MA20'))
     H, L = np.fmax(H, np.fmax(O, Cc)), np.fmin(L, np.fmin(O, Cc))
-    lo = np.where(valid, np.fmin(L, O), np.inf).min(axis=1, keepdims=True)
-    hi = np.where(valid, np.fmax(H, O), -np.inf).max(axis=1, keepdims=True)
-    flat = (hi - lo) < 1e-10
-    rng_ = np.maximum(hi - lo, 1e-10)
-    n = lambda x: (x - lo) / rng_  # noqa: E731
+    has_ma = valid & np.isfinite(MA)
+    lo = np.fmin(np.where(valid, L, np.inf), np.where(has_ma, MA, np.inf)).min(axis=1, keepdims=True)
+    hi = np.fmax(np.where(valid, H, -np.inf), np.where(has_ma, MA, -np.inf)).max(axis=1, keepdims=True)
+    flat = ~(hi > lo)
+    n = lambda x: (x - lo) / np.where(flat, 1.0, hi - lo)  # noqa: E731
     Cn = pd.DataFrame(np.where(valid, n(Cc), np.nan)).T.ffill().bfill().T.to_numpy()
     exp = np.stack([np.where(valid, n(O), Cn), np.where(valid, n(H), Cn), np.where(valid, n(L), Cn), Cn,
-                    np.where(valid & np.isfinite(MA) & ~flat, n(MA), Cn),
+                    np.where(has_ma, n(MA), Cn),
                     np.where(valid, a['Vol'], 0) / np.nanmax(np.where(valid, a['Vol'], np.nan), axis=1, keepdims=True),
                     valid.astype(float)], axis=2)
     fd = os.path.join(CLEAN_INPUTS_DIR, 'features140')
@@ -147,9 +158,28 @@ def check_features_independent(uni, n_sample=40_000, seed=0) -> dict:
     out = {'n_sample': n_sample, 'max_abs_diff_by_channel': dict(zip(FEATURE_NAMES, d.max(axis=(0, 1)).round(8).tolist())),
            'share_within_float32_tol': float((d <= 1e-6 * scale).mean()),
            'max_abs_value_by_channel': dict(zip(FEATURE_NAMES, np.abs(exp).max(axis=(0, 1)).round(4).tolist())),
-           'flat_range_windows': int(flat.sum())}
+           'flat_range_windows': int(flat.sum()),
+           'ma_sets_price_bound_share': float(((np.where(has_ma, MA, -np.inf).max(axis=1) > np.where(valid, H, -np.inf).max(axis=1))
+                                               | (np.where(has_ma, MA, np.inf).min(axis=1) < np.where(valid, L, np.inf).min(axis=1))).mean())}
 
-    return out
+    k = np.arange(min(n_official, n_sample))
+    y_of = uni['year'].to_numpy()
+    start = {y: int(np.flatnonzero(y_of == y)[0]) for y in np.unique(y_of[pick[k]])}
+    imgs = {}
+    same = np.zeros(len(k), dtype=bool)
+    for j in k:
+        y = int(y_of[pick[j]])
+        if y not in imgs:
+            m = int((y_of == y).sum())
+            imgs[y] = np.memmap(os.path.join(NEW_IMG_DIR, fn(y, '_images.dat')), dtype='uint8', mode='r', shape=(m, 64, 60))
+        df = pd.DataFrame({'Open': np.where(valid[j], O[j], np.nan), 'High': np.where(valid[j], H[j], np.nan),
+                           'Low': np.where(valid[j], L[j], np.nan), 'Close': Cc[j], 'ma20': np.where(has_ma[j], MA[j], np.nan),
+                           'Vol': np.where(valid[j] & (a['Vol'][j] > 0), a['Vol'][j], np.nan)})
+        ref = JkxDrawOHLC(df, has_volume_bar=True, ma_lags=[20]).draw_image()
+        same[j] = ref is not None and np.array_equal(np.asarray(ref, dtype=np.uint8), imgs[y][pick[j] - start[y]])
+    official = {'n_compared': int(len(k)), 'pixel_identical_share': float(same.mean()),
+                'mismatch_examples': s.loc[k[~same][:5], ['StockID', 'ending_date']].astype(str).values.tolist()}
+    return out, official
 
 
 def check_keys(uni) -> dict:
@@ -182,13 +212,14 @@ def check_pixels(n_per_year=1500, seed=1) -> dict:
         X = np.asarray(X_all[tag][offset[tag] + idx], dtype=np.float64).reshape(len(idx), 20, 7)
         offset[tag] += n
         im = np.asarray(img[idx])
-        yp = lambda v: np.floor((1 - v) * (ph - 1) + 0.5).astype(int)  # noqa: E731
+        yp = lambda v: (ph - 1) - np.around(v * (ph - 1)).astype(int)  # noqa: E731
 
         def tick_ok(ii, v, col):
             y0 = yp(v)
             hit = im[ii, y0, col] == 255
-            near_half = np.abs(((1 - v) * (ph - 1)) % 1 - 0.5) < 1e-4
-            alt = np.clip(np.where(((1 - v) * (ph - 1)) % 1 < 0.5, y0 + 1, y0 - 1), 0, ph - 1)
+            frac = (v * (ph - 1)) % 1
+            near_half = np.abs(frac - 0.5) < 1e-4
+            alt = np.clip(np.where(y0 == yp(v + 1e-3 / (ph - 1)), y0 + 1, y0 - 1), 0, ph - 1)
             return hit, hit | (near_half & (im[ii, alt, col] == 255))
 
         for t in range(20):
@@ -201,8 +232,11 @@ def check_pixels(n_per_year=1500, seed=1) -> dict:
             col = im[ii, :ph, 3 * t + 1] > 0
             top, bot = yp(X[ii, t, 1]), yp(X[ii, t, 2])
             stats['hl'].append(col[np.arange(len(ii)), top] & col[np.arange(len(ii)), bot])
-            bh = np.maximum(1, (X[ii, t, 5] * (vb - vt)).astype(int))
-            stats['vol'].append((im[ii, vt:, 3 * t + 1] > 0).sum(axis=1) == bh + 1)
+            vh = X[ii, t, 5] * (vb - vt + 1)
+            got = (im[ii, vt:, 3 * t + 1] > 0).sum(axis=1)
+            stats['vol'].append(got == np.maximum(1, np.around(vh)))
+            stats.setdefault('vol_allowing_half_pixel_ties', []).append(
+                (got == np.maximum(1, np.around(vh))) | ((np.abs(vh % 1 - 0.5) < 1e-4) & (np.abs(got - vh) < 0.51)))
             jj = np.flatnonzero(~ok)
             stats['blank_missing'].append(im[jj, :, 3 * t:3 * t + 3].reshape(len(jj), 64 * 3).max(axis=1) == 0)
     return {k: float(np.concatenate(v).mean()) for k, v in stats.items()}
@@ -230,8 +264,9 @@ def main() -> int:
     res = {}
     res['A0_universe_independent'] = check_universe_independent(uni)
     print(json.dumps(res['A0_universe_independent'], indent=2))
-    res['A_features_independent'] = check_features_independent(uni)
+    res['A_features_independent'], res['E_official_renderer'] = check_features_independent(uni)
     print(json.dumps(res['A_features_independent'], indent=2))
+    print(json.dumps(res['E_official_renderer'], indent=2, ensure_ascii=False))
     res['B_keys'] = check_keys(uni)
     print(json.dumps(res['B_keys'], indent=2))
     res['C_pixels'] = check_pixels()

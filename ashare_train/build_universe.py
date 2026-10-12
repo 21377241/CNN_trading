@@ -20,7 +20,8 @@ build_universe.py - 周度样本键、标签、切分（clean_spec 第 3.1 节�
   MarketCap, Close            t 日流通市值、后复权收盘价
 
 样本条件：t 日有交易且收盘价为正；t 日非 ST；t 日不在退市整理期；首个交易日序号 <= t_idx - 39；
-窗口（t 往前 20 个市场日）内没有成交量为 0 的交易行（CSMAR Filling = 0 但 Dnshrtrd = 0，价格只是前收盘的延续）。
+窗口（t 往前 20 个市场日）内没有成交量为 0 的交易行（CSMAR Filling = 0 但 Dnshrtrd = 0，价格只是前收盘的延续）；
+窗口内 O/H/L/C/MA20 的最大值大于最小值（价格区间为零时图像纵轴无定义，Jiang 官方代码丢弃这类样本）。
 
 退市整理期：CSMAR Trdsta 没有整理期编码（整理期首日标 *ST，其后标正常交易；2020 年前的创业板股票没有 *ST），
 按公司文件的证券简称识别：简称含“退”的股票，其最后一段连续交易（与前一交易行相隔超过 1 个市场日即断开，
@@ -54,6 +55,8 @@ TRAIN_YEARS = range(2000, 2006)
 VAL_YEARS = range(2006, 2008)
 OOS_YEARS = range(2008, 2027)
 BOARD_OF_MARKETTYPE = {1: 'main', 4: 'main', 16: 'chinext', 32: 'star', 64: 'bse'}
+FLAT_RTOL = 1e-10
+PRICE_COLS = ['Open', 'High', 'Low', 'Close', 'MA20']
 
 
 def week_end_dates(calendar: pd.DatetimeIndex) -> pd.DatetimeIndex:
@@ -94,6 +97,19 @@ def delist_consolidation(code: np.ndarray, m: np.ndarray, delisting_name: np.nda
                   'rows': int(flag.sum())}
 
 
+def flat_price_window(px: np.ndarray, lo: np.ndarray) -> np.ndarray:
+    """px: (行, 5) 的 O/H/L/C/MA20；lo[i]: 第 i 行窗口的首行。返回窗口内价格最大值与最小值是否相等（相对误差 FLAT_RTOL）。"""
+    with np.errstate(invalid='ignore'):
+        rmax, rmin = np.nanmax(px, axis=1), np.nanmin(px, axis=1)
+    i = np.arange(len(px))
+    wmax, wmin = rmax.copy(), rmin.copy()
+    for k in range(1, WINDOW):
+        j = np.maximum(i - k, lo)
+        wmax = np.fmax(wmax, rmax[j])
+        wmin = np.fmin(wmin, rmin[j])
+    return (wmax - wmin) <= FLAT_RTOL * wmax
+
+
 def build(panel: pd.DataFrame, flow: dict | None = None, delisting_name: np.ndarray | None = None) -> pd.DataFrame:
     flow = {} if flow is None else flow
     if not (panel['Close'] > 0).all():
@@ -111,6 +127,7 @@ def build(panel: pd.DataFrame, flow: dict | None = None, delisting_name: np.ndar
     n_obs = np.arange(len(key)) - lo + 1
     cz = np.r_[0, np.cumsum(panel['Vol_raw'].to_numpy() <= 0)]
     n_zero = cz[np.arange(len(key)) + 1] - cz[lo]
+    flat = flat_price_window(panel[PRICE_COLS].to_numpy(np.float64), lo)
     if delisting_name is None:
         delisting_name = np.zeros(code.max() + 1, dtype=bool)
     consol, flow['delist_consolidation'] = delist_consolidation(code, m, delisting_name)
@@ -127,6 +144,7 @@ def build(panel: pd.DataFrame, flow: dict | None = None, delisting_name: np.ndar
     u['n_obs_in_win'] = n_obs[is_we].astype(np.int16)
     u['n_zero_vol'] = n_zero[is_we]
     u['consol'] = consol[is_we]
+    u['flat'] = flat[is_we]
     u['next_m'] = next_m
     u = u[(u['next_m'] >= 0).values]
     yr = u['Date'].dt.year
@@ -137,7 +155,8 @@ def build(panel: pd.DataFrame, flow: dict | None = None, delisting_name: np.ndar
     conds = [('st_on_t', u['is_ST'] != 0),
              ('delist_consolidation_on_t', u['consol']),
              ('ipo_within_39_market_days', u['first_idx'] > u['t_idx'] - (WINDOW + MA_LOOKBACK)),
-             ('zero_volume_row_in_window', u['n_zero_vol'] > 0)]
+             ('zero_volume_row_in_window', u['n_zero_vol'] > 0),
+             ('flat_price_range_in_window', u['flat'])]
     drop = np.zeros(len(u), dtype=bool)
     for name, c in conds:
         c = c.to_numpy()
@@ -174,7 +193,7 @@ def main(argv=None) -> int:
     argparse.ArgumentParser().parse_args(argv)
     t0 = time.time()
     panel = pd.read_feather(ASHARE_PANEL_PATH, columns=['Date', 'StockID', 'Close', 'MarketCap', 'is_ST', 'Vol_raw',
-                                                        'Markettype'])
+                                                        'Markettype', 'Open', 'High', 'Low', 'MA20'])
     info = pd.read_feather(ASHARE_STOCK_INFO_PATH, columns=['StockID', 'name'])
     names = info.set_index(info['StockID'].astype(str))['name'].reindex(panel['StockID'].cat.categories.astype(str))
     flow = {}

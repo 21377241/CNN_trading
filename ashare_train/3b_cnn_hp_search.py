@@ -56,7 +56,7 @@ def _trial_suffix(patience: int, stage: str = 'hp', metric_tag: str = 'ric') -> 
 
 
 def _trial_row(trial_id: str, phase: str, lr: float, dropout: float, patience: int,
-               result: dict, stage: str) -> dict:
+               train_patience: int, result: dict, stage: str) -> dict:
     return {
         'trial_id': trial_id,
         'phase': phase,
@@ -64,6 +64,7 @@ def _trial_row(trial_id: str, phase: str, lr: float, dropout: float, patience: i
         'lr': lr,
         'dropout': dropout,
         'patience': patience,
+        'train_patience': train_patience,
         'best_val_mcc': result.get('best_val_mcc'),
         'best_val_rank_ic': result.get('best_val_rank_ic'),
         'best_val_loss': result.get('best_val_loss'),
@@ -100,12 +101,13 @@ def _run_trial(cfg, lr, dropout, patience, train_patience, n_ensembles,
         batch_size=cfg.get('batch_size', 128),
         max_epochs=cfg.get('max_epochs', 50),
         early_stop_patience=train_patience,
-        dir_suffix=_trial_suffix(patience, stage='hp', metric_tag=tag),
+        # cached checkpoints are keyed by the patience actually used for early stopping
+        dir_suffix=_trial_suffix(train_patience, stage='hp', metric_tag=tag),
         force_retrain=force,
         search_metric=metric,
         training=cfg['training'],
     )
-    return _trial_row(trial_id, phase, lr, dropout, patience, result, stage)
+    return _trial_row(trial_id, phase, lr, dropout, patience, train_patience, result, stage)
 
 
 def _best_lr(rows: list, metric_col: str) -> float:
@@ -176,7 +178,9 @@ def run_phase1(cfg, dataset_dir, out_root, force: bool) -> pd.DataFrame:
 
 
 def _top_trials(df: pd.DataFrame, k: int, anchor: dict, metric_col: str) -> pd.DataFrame:
-    top = df.sort_values(metric_col, ascending=False).head(k).copy()
+    top = (df.sort_values(metric_col, ascending=False)
+             .drop_duplicates(subset=['lr', 'dropout', 'patience'])
+             .head(k).copy())
     has_anchor = (
         (top['lr'] == anchor['lr']) &
         (top['dropout'] == anchor['dropout']) &

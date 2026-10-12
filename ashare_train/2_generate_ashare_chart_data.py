@@ -39,7 +39,7 @@ from Misc.config import (  # noqa: E402
     ASHARE_COUNTRY, ASHARE_PANEL_PATH, ASHARE_STOCKS_SAVEPATH, ASHARE_UNIVERSE_PATH, CLEAN_INPUTS_DIR,
 )
 from Data.clean_window import (  # noqa: E402
-    WINDOW, close0_path, features_140, gather_windows, load_grid, ma_out_of_range_share, render_window_images,
+    WINDOW, close0_path, features_140, gather_windows, load_grid, ma_sets_bound_share, render_window_images,
     universe_meta,
 )
 from Data.dgp_config import get_dataset_dir, get_dataset_filename  # noqa: E402
@@ -77,26 +77,25 @@ def process_year(grid, u: pd.DataFrame, year: int, force: bool, features_only: b
     s_idx = grid.stock_index(meta['StockID'])
     img_mm = None if features_only else np.memmap(p_img, dtype='uint8', mode='w+', shape=(n, IMG_SIZE))
     X = np.empty((n, WINDOW, 7), dtype=np.float32)
-    oor_num = 0.0
+    ma_bound_num = 0.0
     for a in range(0, n, BATCH):
         b = min(n, a + BATCH)
         p = close0_path(gather_windows(grid, t_idx[a:b], s_idx[a:b]))
         if img_mm is not None:
             img_mm[a:b] = render_window_images(p).reshape(b - a, IMG_SIZE)
         X[a:b] = features_140(p)
-        oor_num += ma_out_of_range_share(p) * p['valid'].sum()
+        ma_bound_num += ma_sets_bound_share(p) * (b - a)
     if img_mm is not None:
         img_mm.flush()
         del img_mm
         meta.to_feather(p_lbl)
     np.save(p_x, X)
-    n_valid_days = float(meta['n_obs_in_win'].sum())
     info = {
         'year': year, 'n': n,
         'trainable': int((meta['binary_label'] >= 0).sum()),
         'embargo': int(meta['embargo'].sum()),
         'n_obs_lt_20_share': float((meta['n_obs_in_win'] < 20).mean()),
-        'ma_out_of_range_day_share': oor_num / max(n_valid_days, 1.0),
+        'ma_sets_price_bound_share': ma_bound_num / max(n, 1),
         'x_nonfinite': int((~np.isfinite(X)).sum()),
     }
     logger.info(f'{year}: {info}')

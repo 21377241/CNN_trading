@@ -62,7 +62,6 @@ class Grid:
 
 
 def load_grid(panel_path: str) -> Grid:
-    """MA 按股票沿时间前向填充：缺失日的 MA20 = 最近一个交易日的 MA20（即最近 20 个有效收盘价的均值）。"""
     p = pd.read_feather(panel_path, columns=['Date', 'StockID', 'Open', 'High', 'Low', 'Close', 'MA20', 'Vol'])
     dates = pd.DatetimeIndex(np.sort(p['Date'].unique()))
     stocks = pd.Index(p['StockID'].cat.categories.astype(str))
@@ -76,7 +75,7 @@ def load_grid(panel_path: str) -> Grid:
         return a
 
     O, H, L, C = (dense(c, np.float64) for c in ('Open', 'High', 'Low', 'Close'))
-    MA = pd.DataFrame(dense('MA20', np.float64)).ffill().to_numpy()
+    MA = dense('MA20', np.float64)
     V = dense('Vol', np.float64)
     return Grid(dates, stocks, O, H, L, C, MA, V)
 
@@ -92,7 +91,9 @@ def gather_windows(grid: Grid, t_idx, s_idx, window: int = WINDOW) -> dict:
 
 
 def close0_path(w: dict) -> dict:
-    """窗口内第一个有效收盘价归一为 1；O/H/L/MA 同比例缩放；修正 H/L 包住 O/C。缺失日 O/H/L/C/V 为 NaN。"""
+    """窗口内第一个有效收盘价归一为 1；O/H/L/MA 同比例缩放；修正 H/L 包住 O/C。缺失日 O/H/L/C/MA/V 为 NaN。
+
+    缺失日的均线为 NaN：Jiang 官方代码按股票自己的交易行取窗口，停牌日没有这一行，也就没有均线值。"""
     valid = np.isfinite(w['C'])
     if not valid.any(axis=1).all():
         raise ValueError('存在窗口内没有任何交易日的样本')
@@ -103,6 +104,7 @@ def close0_path(w: dict) -> dict:
     L = np.where(valid, np.fmin(L, np.fmin(O, C)), np.nan)
     O = np.where(valid, O, np.nan)
     C = np.where(valid, C, np.nan)
+    MA = np.where(valid, MA, np.nan)
     V = np.where(valid, w['V'], np.nan)
     return {'O': O, 'H': H, 'L': L, 'C': C, 'MA': MA, 'V': V, 'valid': valid}
 
@@ -126,13 +128,14 @@ def _ffill_rows(a: np.ndarray) -> np.ndarray:
 def features_140(p: dict) -> np.ndarray:
     """返回 float32 (N, 20, 7)。展平为 140 维时按天优先（reshape(N, -1)）。
 
-    无交易日的 O/H/L/C/MA 都取占位收盘价、V 为 0、有交易标记为 0：图像在这些日子是空白列，
-    不能让 MA 带入窗口外（停牌前）的信息。
-    价格区间为零的窗口（hi = lo）价格轴无定义，图像也不画均线，MA 同样取占位收盘价。"""
-    lo, hi, valid = price_bounds(p['O'], p['H'], p['L'], p['C'])
+    价格（含 MA20）与图像纵轴同一定标：O/H/L/C 与均线一起取最小、最大值，缩放到 [0, 1]。
+    无交易日的 O/H/L/C/MA 都取占位收盘价、V 为 0、有交易标记为 0：图像在这些日子是空白列。
+    均线不可用的交易日（有效收盘价不足 20 个）MA 也取占位收盘价。"""
+    valid = p['valid']
+    lo, hi = price_bounds(p['O'], p['H'], p['L'], p['C'], p['MA'])
+    if not (hi > lo).all():
+        raise ValueError(f'{int((~(hi > lo)).sum())} 个窗口价格区间为零，应已由 universe 剔除')
     rng = hi - lo
-    flat = rng < 1e-10
-    rng = np.where(flat, 1e-10, rng)
 
     def norm(a):
         return (a - lo[:, None]) / rng[:, None]
@@ -141,7 +144,7 @@ def features_140(p: dict) -> np.ndarray:
     C_fill = _ffill_rows(C)
     O, H, L = (np.where(valid, norm(p[k]), C_fill) for k in ('O', 'H', 'L'))
     MA = norm(p['MA'])
-    MA = np.where(valid & np.isfinite(MA) & ~flat[:, None], MA, C_fill)
+    MA = np.where(np.isfinite(MA), MA, C_fill)
     V = np.where(valid, p['V'], 0.0)
     vmax = V.max(axis=1, keepdims=True)
     V = np.where(vmax > 1e-10, V / np.where(vmax > 1e-10, vmax, 1.0), 0.0)
@@ -149,8 +152,11 @@ def features_140(p: dict) -> np.ndarray:
     return feats.astype(np.float32)
 
 
-def ma_out_of_range_share(p: dict) -> float:
-    lo, hi, valid = price_bounds(p['O'], p['H'], p['L'], p['C'])
+def ma_sets_bound_share(p: dict) -> float:
+    """均线高于全部 OHLC 或低于全部 OHLC（即均线决定纵轴上界或下界）的窗口占比。"""
+    lo, hi = price_bounds(p['O'], p['H'], p['L'], p['C'])
     ma = p['MA']
-    out = valid & np.isfinite(ma) & ((ma < lo[:, None]) | (ma > hi[:, None]))
-    return float(out.sum() / max(valid.sum(), 1))
+    with np.errstate(invalid='ignore'):
+        above = np.nanmax(np.where(np.isfinite(ma), ma, -np.inf), axis=1) > hi
+        below = np.nanmin(np.where(np.isfinite(ma), ma, np.inf), axis=1) < lo
+    return float((above | below).mean())

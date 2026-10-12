@@ -40,9 +40,10 @@ IMAGE_HEIGHT = {
     60: 128,   # 60日 → 128px
 }
 
-# 成交量区域参数
-VOLUME_CHART_GAP = 2          # 价格区与成交量区之间的间隔（像素）
+# 成交量区域参数（Jiang 官方代码：成交量区 int(高度 / 5) 行，间隔 1 行；20 日图价格区 51 行）
+VOLUME_CHART_GAP = 1          # 价格区与成交量区之间的间隔（像素）
 VOLUME_CHART_HEIGHT_RATIO = 0.2   # 成交量区占总高度的比例
+LEGACY_VOLUME_CHART_GAP = 2   # 旧画法（bar_style='legacy_candle'）的间隔，仅用于复现旧结果
 
 # ──────────────────────────────────────────────
 # 颜色（灰度图）
