@@ -1,0 +1,13 @@
+# 训练环境（与本机 2026-10 训练 registry v2 模型时的版本一致）
+# Python 3.12.3
+# PyTorch 先单独安装（H100 用 CUDA 12.x 的轮子），见 docs/migration_gpu_server.md：
+#   pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu124
+numpy==2.1.3
+pandas==2.2.2
+scipy==1.16.3
+scikit-learn==1.7.2
+pyarrow==23.0.0
+Pillow==10.3.0
+PyYAML==6.0.1
+joblib==1.4.2
+psutil==5.9.8
