@@ -11,8 +11,9 @@ eval_clean_cnn_impact.py — 阶段 4a：图像缺陷与数据修正对 chart-CN
   B  共同样本：A 与干净 universe（OOS 且有标签）的交集，统一用干净标签 ret_label 和流通市值：三个模型
   C  各自原生样本：M2 用干净 universe 的全部 OOS 样本（有标签）
 
-用法:
-  python experiments/E1_image_baseline/eval_clean_cnn_impact.py
+用法（clean_spec 第 9 节“C3 影响报告分两步”）:
+  python experiments/E1_image_baseline/eval_clean_cnn_impact.py --part A    # 口径 A 与验证集；不读 M2 的 OOS 预测
+  python experiments/E1_image_baseline/eval_clean_cnn_impact.py --part all  # C4 冻结之后：口径 A、B、C
 """
 from __future__ import annotations
 
@@ -127,22 +128,23 @@ def diff_t(wa: pd.DataFrame, wb: pd.DataFrame, col: str) -> tuple[float, float]:
     return float(np.nanmean(x)), newey_west_t(x)[0]
 
 
-def plot_yearly(yearly: pd.DataFrame, path: str):
+def plot_yearly(yearly: pd.DataFrame, path: str, title: str):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(10, 3.6))
     x = np.arange(len(yearly))
-    cols = ['M0', 'M1', 'M2']
     labels = {'M0': 'M0 old', 'M1': 'M1 renderer fixed', 'M2': 'M2 clean'}
+    cols = [c for c in labels if c in yearly.columns]
+    width = 0.8 / len(cols)
     for i, c in enumerate(cols):
-        ax.bar(x + (i - 1) * 0.27, yearly[c], width=0.27, label=labels[c])
+        ax.bar(x + (i - (len(cols) - 1) / 2) * width, yearly[c], width=width, label=labels[c])
     ax.axhline(0, color='k', lw=0.6)
     ax.set_xticks(x)
     ax.set_xticklabels(yearly.index.astype(str), rotation=45)
     ax.set_ylabel('mean weekly Rank IC')
-    ax.set_title('Yearly OOS Rank IC on the common sample (clean labels)')
-    ax.legend(ncol=3, fontsize=8)
+    ax.set_title(title)
+    ax.legend(ncol=len(cols), fontsize=8)
     fig.tight_layout()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fig.savefig(path, dpi=130)
@@ -168,16 +170,61 @@ def val_rank_ic(exp_dir: str, model_key: str, n: int = 5) -> dict:
             'n_val': int(len(ds)), 'val_up_share': ds.up_share, 'per_seed': per_seed}
 
 
+KEY = ['StockID', 'ending_date']
+
+
+def panel_a(preds: dict) -> pd.DataFrame:
+    """口径 A：M0 的 OOS 样本键、旧标签、旧市值。"""
+    a = preds['M0'][KEY + ['ret_val', 'MarketCap', 'up_prob']].rename(columns={'up_prob': 'M0'})
+    a = a.merge(preds['M1'][KEY + ['up_prob']].rename(columns={'up_prob': 'M1'}), on=KEY, how='inner')
+    if len(a) != len(preds['M0']) or len(a) != len(preds['M1']):
+        raise RuntimeError(f'M0/M1 样本键不一致：{len(preds["M0"])} / {len(preds["M1"])} / 交集 {len(a)}')
+    return a
+
+
+def run_part_a(dirs: dict, m2_hp: dict, skip_val: bool) -> int:
+    preds = {k: load_preds(dirs[k], OOS_YEARS_OLD) for k in ('M0', 'M1')}
+    a = panel_a(preds)
+    weekly = {m: weekly_stats(a, m, 'ret_val', 'MarketCap') for m in ('M0', 'M1')}
+    summary = pd.DataFrame([{'panel': 'A', 'model': m, **summarize(w)} for m, w in weekly.items()])
+    diffs = pd.DataFrame([{'panel': 'A', 'diff': 'M1-M0', 'metric': col,
+                           **dict(zip(('mean_diff', 'nw_t'), diff_t(weekly['M1'], weekly['M0'], col)))}
+                          for col in ('rank_ic', 'ew_hl', 'vw_hl')])
+    yearly = pd.concat({m: w['rank_ic'].groupby(w.index.year).mean() for m, w in weekly.items()}, axis=1)
+    out = {'part': 'A', 'dirs': dirs, 'm2_hp': m2_hp, 'n_obs': {'A': len(a)},
+           'pred_rank_corr': {'A_M0_M1': pred_rank_corr(a, 'M0', 'M1')}}
+    if not skip_val:
+        out['val'] = {k: val_rank_ic(v, k) for k, v in dirs.items()}
+
+    summary.to_csv(os.path.join(OUT_DIR, 'partA_summary.csv'), index=False, float_format='%.6g')
+    diffs.to_csv(os.path.join(OUT_DIR, 'partA_differences.csv'), index=False, float_format='%.6g')
+    yearly.to_csv(os.path.join(OUT_DIR, 'partA_yearly_rank_ic.csv'), float_format='%.6g')
+    plot_yearly(yearly, os.path.join(PROJECT_ROOT, 'docs', 'figures', 'clean_cnn_impact_partA_yearly_ric.png'),
+                'Yearly OOS Rank IC, old sample and old labels (sample A)')
+    with open(os.path.join(OUT_DIR, 'partA_impact.json'), 'w', encoding='utf-8') as f:
+        json.dump(out, f, ensure_ascii=False, indent=2, default=float)
+
+    pd.set_option('display.width', 200)
+    print(summary.to_string(index=False))
+    print(diffs.to_string(index=False))
+    print(json.dumps(out, ensure_ascii=False, indent=1, default=float))
+    print(yearly.round(4).to_string())
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument('--part', choices=['A', 'all'], required=True)
     ap.add_argument('--skip-val', action='store_true')
     args = ap.parse_args()
     os.makedirs(OUT_DIR, exist_ok=True)
 
     m2, m2_hp = m2_dir()
     dirs = {'M0': M0_DIR, 'M1': M1_DIR, 'M2': m2}
+    if args.part == 'A':
+        return run_part_a(dirs, m2_hp, args.skip_val)
     preds = {k: load_preds(v, OOS_YEARS_CLEAN if k == 'M2' else OOS_YEARS_OLD) for k, v in dirs.items()}
-    key = ['StockID', 'ending_date']
+    key = KEY
 
     u = pd.read_feather(ASHARE_UNIVERSE_PATH, columns=['StockID', 'ending_date', 'split', 'ret_label', 'label',
                                                      'board', 'is_bj', 'MarketCap'])
@@ -186,11 +233,7 @@ def main():
     u = u[(u['split'] == 'oos') & u['ret_label'].notna() & ~u['is_bj']]
     u = u.drop(columns='is_bj').rename(columns={'MarketCap': 'mcap_clean'})
 
-    # A：旧样本、旧标签
-    a = preds['M0'][key + ['ret_val', 'MarketCap', 'up_prob']].rename(columns={'up_prob': 'M0'})
-    a = a.merge(preds['M1'][key + ['up_prob']].rename(columns={'up_prob': 'M1'}), on=key, how='inner')
-    if len(a) != len(preds['M0']) or len(a) != len(preds['M1']):
-        raise RuntimeError(f'M0/M1 样本键不一致：{len(preds["M0"])} / {len(preds["M1"])} / 交集 {len(a)}')
+    a = panel_a(preds)
     # B：共同样本、干净标签
     b = a.drop(columns=['ret_val', 'MarketCap']).merge(u, on=key, how='inner')
     b = b.merge(preds['M2'][key + ['up_prob']].rename(columns={'up_prob': 'M2'}), on=key, how='inner')
@@ -223,7 +266,8 @@ def main():
                         for m in ('M0', 'M1', 'M2')}, axis=1)
     yearly['M2_native'] = weekly[('C', 'M2')]['rank_ic'].groupby(weekly[('C', 'M2')].index.year).mean()
     yearly.to_csv(os.path.join(OUT_DIR, 'yearly_rank_ic.csv'), float_format='%.6g')
-    plot_yearly(yearly, os.path.join(PROJECT_ROOT, 'docs', 'figures', 'clean_cnn_impact_yearly_ric.png'))
+    plot_yearly(yearly, os.path.join(PROJECT_ROOT, 'docs', 'figures', 'clean_cnn_impact_yearly_ric.png'),
+                'Yearly OOS Rank IC on the common sample (clean labels)')
 
     sub_rows = []
     for name, df, models in [('B', b, ['M0', 'M1', 'M2']), ('C', c, ['M2'])]:
