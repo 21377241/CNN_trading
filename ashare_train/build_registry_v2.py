@@ -2,7 +2,7 @@
 """
 build_registry_v2.py — 登记三个规范模型的 OOS 预测（clean_spec 第 9 节“C3 训练前补充”）。
 
-  chartcnn_clean：第三阶段完整训练的各组中，5 个成员 loss 最优 checkpoint 的验证 Rank IC 均值最高的一组；
+  chartcnn_clean：第三阶段完整训练的各组中，5 个成员 checkpoint（按验证 Rank IC 早停保存）的验证 Rank IC 均值最高的一组；
                   由 checkpoint 重新预测（stitch_cnn_oos.py --regenerate）并与逐年文件比对
   onedcnn_140、mlp_140：hp_numeric_140 两阶段搜参选定的组合（3d_numeric_hp_search.py），由各 seed 的权重重新预测并比对
 
@@ -45,6 +45,7 @@ HP_NUMERIC_ROOT = os.path.join(PAPER, 'hp_numeric_140')
 SEEDS = [42, 43, 44, 45, 46]
 KEYS = ['StockID', 'ending_date']
 TOL = 1e-4
+CHART_MONITOR = 'rank_ic'
 
 
 def sha1_of(path: str) -> str:
@@ -108,7 +109,10 @@ def chart_selection() -> dict:
         cks = sorted(glob.glob(os.path.join(r['exp_dir'], 'checkpoint*.pth.tar')))
         if len(cks) != len(SEEDS):
             raise RuntimeError(f'{r["exp_dir"]}: checkpoint 数 {len(cks)} != {len(SEEDS)}')
-        rics = [float(torch.load(c, map_location='cpu', weights_only=False)['val_rank_ic']) for c in cks]
+        ckpts = [torch.load(c, map_location='cpu', weights_only=False) for c in cks]
+        if any(ck.get('monitor') != CHART_MONITOR for ck in ckpts):
+            raise RuntimeError(f'{r["exp_dir"]}: checkpoint 的 monitor 不是 {CHART_MONITOR}')
+        rics = [float(ck['val_rank_ic']) for ck in ckpts]
         rows.append({'lr': float(r['lr']), 'dropout': float(r['dropout']), 'patience': int(r['patience']),
                      'label': r['label'], 'exp_dir': r['exp_dir'], 'val_rank_ic_members': rics,
                      'val_rank_ic_mean': float(np.mean(rics))})
@@ -135,7 +139,8 @@ def build_chart(keys: pd.DataFrame) -> dict:
     return {'path': rel(path), 'sha1': sha1, **acc, 'members': members, 'seeds': SEEDS,
             'source': rel(best['exp_dir']), 'hp': {k: best[k] for k in ('lr', 'dropout', 'patience')},
             'selection': {'rule': 'phase-3 configuration with the highest mean validation Rank IC '
-                                  '(loss-best checkpoint) over its 5 members',
+                                  '(checkpoint saved by early stopping on validation Rank IC) over its 5 members',
+                          'monitor': CHART_MONITOR,
                           'candidates': [{**{k: c[k] for k in ('lr', 'dropout', 'patience', 'label',
                                                                 'val_rank_ic_members', 'val_rank_ic_mean')},
                                           'exp_dir': rel(c['exp_dir'])} for c in sel['candidates']]},
@@ -208,13 +213,13 @@ def main():
         entry['registered_at'] = datetime.now().isoformat(timespec='seconds')
         reg['predictions'][name] = entry
         print(f'{name}: rows={entry["rows"]:,} sha1={entry["sha1"][:16]}', flush=True)
-    reg['git_commit'] = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=PROJECT_ROOT, capture_output=True,
-                                       text=True).stdout.strip()
-    tmp = REGISTRY + '.tmp'
-    with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(reg, f, ensure_ascii=False, indent=2)
-    shutil.move(tmp, REGISTRY)
-    print(f'wrote {REGISTRY}')
+        reg['git_commit'] = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=PROJECT_ROOT, capture_output=True,
+                                           text=True).stdout.strip()
+        tmp = REGISTRY + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(reg, f, ensure_ascii=False, indent=2)
+        shutil.move(tmp, REGISTRY)
+        print(f'wrote {REGISTRY}', flush=True)
     return 0
 
 
