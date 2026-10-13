@@ -26,12 +26,12 @@
 
 ## 3. 环境准备
 
-按 `docs/migration_gpu_server.md`：
+容器状态（2026-10-13 检查）：Ubuntu 20.04，192 核，2 TB 内存，8 个 GPU 设备节点，驱动 580.95.05；访问不了 GitHub，能访问 PyPI 和 PyTorch 源；没有 tmux。
 
-1. GPU：`nvidia-smi` 须能显示 H100（2026-10-13 时容器报 “Failed to initialize NVML”，需平台修复）。
-2. 数据包 `/root/cnn_trading/cnn_data.tar.gz` 的 sha1 须为 `d3dd0ad56c11c14a08ef7858ed263a1a0a1155fb`（2026-10-13 时只传了约 96%，需续传）。
-3. 代码：`/root/cnn_trading` 已有数据包，非空目录不能直接 clone，用 `git init`、`git remote add origin <url>`、`git fetch origin clean-data`、`git checkout -b clean-data origin/clean-data`。
-4. 安装环境、解包到 `WORK_SPACE/`，`python ashare_train/data_manifest.py --check` 须为 98/98。
+1. Python 环境：conda 环境 `cnn` 已装好（Python 3.12.3、torch 2.5.1+cu124，其余包与 `requirements-gpu.txt` 一致）。用 `source /root/anaconda3/bin/activate cnn` 激活；系统自带的 `python3` 是 3.8，不要用。
+2. GPU：`nvidia-smi` 须能列出 GPU，`python -c "import torch; print(torch.cuda.device_count())"` 须大于 0。2026-10-13 时报 “Failed to initialize NVML: Unknown Error”，torch 看不到 GPU，需平台修复（通常重启容器实例即可）。
+3. 代码：`/root/cnn_trading` 已检出 `clean-data`，`origin` 是同一台机器上的裸仓库 `/root/cnn_trading.git`（同步方式见第 6 节）。
+4. 数据：`/root/cnn_trading/cnn_data.tar.gz` 的 sha1 须为 `d3dd0ad56c11c14a08ef7858ed263a1a0a1155fb`（2026-10-13 时只传了约 96%，需续传）。在 `/root/cnn_trading` 下执行 `tar -xzf cnn_data.tar.gz -C WORK_SPACE`，然后 `python ashare_train/data_manifest.py --check` 须为 98/98。详见 `docs/migration_gpu_server.md`。
 
 ## 4. 执行顺序
 
@@ -69,7 +69,10 @@
 
 ## 6. 两台机器的分工与同步
 
-代码同时在原机器（Windows，RTX 3060）和容器上修改，通过 GitHub 的 `clean-data` 分支同步。
+代码同时在原机器（Windows，RTX 3060）和容器上修改。容器访问不了 GitHub，同步中心是容器上的裸仓库 `/root/cnn_trading.git`：
+
+- 容器上的工作目录 `/root/cnn_trading` 的 `origin` 指向它，直接 `git pull`、`git push`。
+- 原机器通过 SSH 访问它（远程名 `project`），并负责把它与 GitHub（远程名 `origin`，作备份）同步。
 
 | | 负责 | 修改的文件 |
 |---|---|---|
@@ -77,7 +80,7 @@
 | 原机器 | C3 影响报告；第二个数据包及其清单 | `experiments/E1_image_baseline/eval_clean_cnn_impact.py`、`docs/figures/clean_cnn_impact_*`、`docs/results/clean_cnn_impact.md`、`ashare_train/data_manifest.py` |
 
 - 两边都会在 clean_spec 第 9 节末尾追加记录。
-- 每次开始工作前先 `git pull --rebase origin clean-data`。小步提交，提交后立即推送；不用 `--force`。
+- 每次开始工作前先 `git pull --rebase`（原机器为 `git pull --rebase project clean-data`）。小步提交，提交后立即推送；不用 `--force`。
 - clean_spec 冲突时保留双方的记录，按日期排列，不改对方的内容。
 - 需要改对方负责的文件时，先告诉用户。
 - `WORK_SPACE/` 不进 git。训练产物留在容器上；需要给原机器的结果，按 `data_manifest.py` 的方式打包并核对 sha1。
