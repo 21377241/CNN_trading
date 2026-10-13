@@ -20,6 +20,10 @@ ITEMS = [
     'data/ashare_stocks_dataset/I20R5_clean',
     'paper/clean_inputs/features140',
     'data/ashare_processed_data/universe_weekly.feather',
+    'paper/registry_v2.json',
+    *[f'paper/hp_numeric_140/{m}/{f}' for m in ('mlp', 'oned') for f in ('selection.json', 'phase1.csv', 'phase2.csv')],
+    *[f'paper/E1c_cnn_hp_I20R5_clean/{f}' for f in ('search_phase1.csv', 'search_phase2.csv',
+                                                    'phase3_full_train.csv', 'config_cnn_hp.yaml')],
 ]
 
 

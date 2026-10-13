@@ -29,24 +29,22 @@ python -c "import torch; print(torch.cuda.get_device_name(0))"
 | universe（样本键与 train/val/oos 切分） | `data/ashare_processed_data/universe_weekly.feather` | 1 | 0.1 GB |
 | 文件清单与 sha1 | `migration_manifest.json` | 1 | 很小 |
 
-目录结构须保持不变。本机打包（在仓库根目录，PowerShell 或 bash 均可）：
+目录结构须保持不变。本机打包：按清单中的文件（2.1 与 2.2 两节，共 98 个）加上清单本身，压缩为 `cnn_data.tar.gz`（约 3.7 GB）：
 
 ```bash
-tar -cf cnn_data.tar -C WORK_SPACE \
-  data/ashare_stocks_dataset/I20R5_clean \
-  paper/clean_inputs/features140 \
-  data/ashare_processed_data/universe_weekly.feather \
-  migration_manifest.json
+python ashare_train/data_manifest.py --write
+python -c "import json; m=json.load(open('WORK_SPACE/migration_manifest.json')); open('filelist.txt','w',newline='\n').write('\n'.join(list(m['files'])+['migration_manifest.json'])+'\n')"
+tar -czf cnn_data.tar.gz -C WORK_SPACE -T filelist.txt
 ```
 
 新机器上解包并逐个文件核对：
 
 ```bash
-mkdir -p WORK_SPACE && tar -xf cnn_data.tar -C WORK_SPACE
-python ashare_train/data_manifest.py --check     # 须显示 87/87 个文件一致
+mkdir -p WORK_SPACE && tar -xzf cnn_data.tar.gz -C WORK_SPACE
+python ashare_train/data_manifest.py --check     # 须显示 98/98 个文件一致
 ```
 
-### 2.2 按需迁移（很小）
+### 2.2 选定记录（很小，已包含在数据包和清单中）
 
 做扩展窗口或稳健性检验时，超参数沿用已选定的组合，需要这些记录：
 
