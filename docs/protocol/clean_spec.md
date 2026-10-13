@@ -663,43 +663,102 @@ E2G、E3/E4/E5（含 T 版本）、E6A、E0 registry/主表脚本的默认输入
 - **E2G 对称检验 1D-CNN-L**：选定 1D-CNN 的各层通道乘以同一正整数 m，m 取使参数量最接近完整 chart-CNN（708,866）的值；其余设定（层数、卷积核、dropout、学习率、早停）不变，训练 seed 42–46。
 - E7 v2、E9、E10 协议中的模型名称与设定在 C4 冻结前按选定结果更新。
 
-### 2026-10-12 早停规则修正：所有模型改为按验证 Rank IC 早停（写于重新搜参开始前；未计算任何 OOS 指标）
+### 2026-10-13 训练期扩展窗口（GPU 服务器；协议写于运行前，结果与结论写于完成后）
 
-**1. 起因**
+目的：在干净数据与已选定超参下，检验主切分（train 2000–2005 / val 2006–2007 / OOS 2008–2025）对「样本内长度」是否敏感。不重新搜参；OOS 结果只作稳健性报告，不参与任何超参或模型选定。
 
-- 训练期（2000–2005）上涨标签比例 46.97%，验证期（2006–2007）60.10%（2006 年 57.96%，2007 年 61.99%）。对验证集恒定输出训练期比例，交叉熵为 0.7072，高于恒定输出 0.5 的 0.6931。验证 loss 因此主要反映模型输出的概率水平与验证期上涨比例的偏差，而不是截面排序。
-- 上一节的数值模型搜参启动后：
-  - MLP 前 5 组的 loss 最优轮全部是第 1 轮，验证 Rank IC 0.021–0.026。以第 1 组为例，16 轮中验证 loss 由 0.706 单调升到 0.779，验证 Rank IC 由 0.026 升到 0.052。
-  - 1D-CNN 第 1 组的 loss 最优轮是第 2 轮（Rank IC 0.026），而第 12 轮的 Rank IC 为 0.047。
-  - 按 loss 早停的数值模型基本没有训练，作为对照不公平。
-- 同时在跑的 chart-CNN 搜参（按 loss 早停，第 5.1 节）有同样现象：验证 loss 多在 0.69 以上且波动，第 2–4 轮即停。第一阶段 8 组已完成（最优验证 Rank IC 0.0505），第二阶段刚开始。
+**切分（每个 OOS 年 y ∈ {2008,…,2025}，共 18 窗）**
 
-**2. 决定**
+| 集合 | 年份 |
+|---|---|
+| train | 2000 … y−3 |
+| val | y−2 … y−1 |
+| predict | 仅 y |
 
-- 所有模型改为按验证 Rank IC 早停：每轮计算验证 Rank IC（逐周截面 Spearman 的均值），比此前最高值高出 1e-6 以上时保存 checkpoint，连续 patience 轮没有新高即停。试验得分为所保存 checkpoint 的验证 Rank IC。
-- 适用于 chart-CNN（第 5.1 节）、MLP-140 与 1D-CNN-140（上一节），以及 C5 的 ChartCNN-S/M、1D-CNN-L、E2F 层数稳健性。
-- 其余不变：各网格、patience（chart-CNN 第一阶段 1、网格 {2, 5}；MLP 15；1D-CNN 10）、最多轮数、三阶段与两阶段流程、选定规则。
-- 试验得分是各轮验证 Rank IC 的最大值，作为验证集表现的估计偏高。所有模型都如此，且只用于选定；OOS 评估不受影响。
-- 相对 Jiang 官方代码属于偏离，已补列在第 7 节。
+例：y=2008 与主规格相同；y=2012 → train 2000–2009，val 2010–2011，预测 2012。
 
-**3. 决定的时点与依据**
+**Embargo**：对该窗的 train 末年与 val 末年，各取最后一个信号周剔除（训练/验证）；不用主规格写死的 2005/2007。标签用 `label_raw` 重建，避免主规格 `binary_label` 中的旧 embargo 污染扩展窗。
 
-- 决定时已看到的只有验证集结果：上述 MLP 5 组、1D-CNN 1 组、chart-CNN 第一阶段 8 组。未计算任何 OOS 指标。
-- 依据是对验证 loss 的诊断（训练期与验证期上涨比例不同），不是哪个模型的结果更好；规则对所有模型相同，所有试验从头重跑。
+**模型与超参（固定）**
 
-**4. 作废与存档**
+| 模型 | 超参来源 |
+|---|---|
+| chart-CNN | `chartcnn_clean`：lr 1e-5，dropout 0.6，patience 5；seed 42–46；monitor=验证 Rank IC |
+| 1D-CNN-140 | `onedcnn_140`：channels [64,128,256]，dropout 0.1，lr 0.001 |
+| MLP-140 | `mlp_140`：hidden (128,64,32,16)，lr 0.003，alpha 0.001 |
 
-- 按 loss 早停的 chart-CNN 搜参、数值模型搜参及其日志移入 `WORK_SPACE/paper/_sup1012/lossES/`，不用于任何比较。
+**实现与产出**
 
-**5. 不受影响的部分**
+- 脚本：`ashare_train/run_expanding_window.py`；提交：`scripts/submit_expanding_window.sh`
+- 输出：`WORK_SPACE/paper/expanding_window/{chart,oned,mlp}/y{YYYY}/`
+- 并行：按 (模型, y) 拆任务；chart/oned 各 1 卡，MLP 用 CPU（`-g 0`）。最多 18×2 个 GPU 任务 + 18 个 CPU 任务。
+- 硬件：SenseCore H100 80GB；软件：Python 3.12.3，torch 2.5.1+cu124，scikit-learn 1.7.2（`/mnt/afs/users/wangyl/conda_envs/cnn`）。
 
-- M1（第 6 节）按旧训练代码（`training: legacy`，按 loss 早停，含学习率调度器）重新训练，与 M0 相同，M1 − M0 仍只反映渲染器的影响。M2 − M1 是干净流程全部改动的合计，现在也包含早停规则的改变，影响报告中注明。
+#### 完成后记录（2026-10-13）
 
-**6. 实现**
+**状态**：54/54 窗成功（chart / oned / mlp × 2008–2025）。oned 2018、2019 曾因集群中途 FAILED 重提后成功；首批 mlp 曾因 `by_year` 特征未 flatten 报错，修复后重提成功。评估：`ashare_train/eval_expanding_window.py`；审计：`ashare_train/audit_expanding_window.py` → `expanding_window/eval/audit_report.md`。
 
-- `cnn_experiment.py` 的 `train_us_model`、`run_cnn_trial` 增加 `monitor`（`loss` 或 `rank_ic`，`rank_ic` 只用于 `training: clean`，legacy 传入时报错）。checkpoint 记录 `monitor`；读取已有 checkpoint 时 `monitor` 不一致即报错，防止误用按 loss 训练的缓存。
-- `config_cnn_hp_clean.yaml` 增加 `monitor: rank_ic`；`3b_cnn_hp_search.py`、`3c_cnn_full_train.py` 读取该项（缺省 `loss`，M1 配置不变）。
-- `3d_numeric_hp_search.py` 的 `MONITOR = 'rank_ic'`，缓存的 `info.json` 的 `monitor` 不一致即报错。
-- 用模拟的逐轮 loss 与 Rank IC 检验：`clean` 按 `loss` 保存第 1 轮、按 `rank_ic` 保存 Rank IC 最高的第 3 轮并在其后 patience 轮停止；`legacy` 的行为与修改前相同。
-- `experiments/E2G_chart_capacity/run_e2g.py` 仍是旧数据流程，C5 改写时须使用 `training: clean`、`monitor: rank_ic` 和干净数据集。
+**评估口径**
+
+- Rank IC：周截面 Spearman，对有限 `ret_val` 样本；全样本汇总另报 Newey–West t（lag=4）。
+- 组合：按 `up_prob` 十分位，H–L = D10−D1；等权与流通市值加权；Sharpe = mean/std×√52，年化收益 = (1+mean)^52−1（`docs/protocol/sharpe_convention.md`）；**未扣交易成本**。
+- 拼接面板：`expanding_window/eval/pred_{chart,oned,mlp}_ew_oos.parquet`（各 2,839,446 行，与 `meta_oos`∩2008–2025 键一致）。chart 原始 CSV 中 StockID 常为未补零整数，拼接与评估时统一 `zfill(6)`；单模型 IC/夏普不受影响。
+
+**全样本 OOS（2008–2025，922 周）**
+
+| 模型 | Rank IC | NW-t | EW H–L Sharpe | EW 年化 | VW H–L Sharpe | VW 年化 | 2008 年 Rank IC |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| chart | 0.0503 | 18.5 | 3.36 | 45.2% | 1.32 | 23.4% | 0.0583 |
+| oned | 0.0747 | 27.3 | 5.23 | 77.0% | 2.36 | 46.7% | 0.0781 |
+| mlp | 0.0488 | 16.8 | 3.36 | 41.4% | 1.25 | 20.7% | 0.0664 |
+
+得分周截面秩相关均值：chart–oned 0.50，chart–mlp 0.45，oned–mlp 0.40。
+
+**逐年 Rank IC**
+
+| year | chart | oned | mlp |
+|---:|---:|---:|---:|
+| 2008 | 0.0583 | 0.0781 | 0.0664 |
+| 2009 | 0.0680 | 0.1214 | 0.0766 |
+| 2010 | 0.0579 | 0.0881 | 0.0737 |
+| 2011 | 0.0398 | 0.0606 | 0.0491 |
+| 2012 | 0.0435 | 0.0766 | 0.0468 |
+| 2013 | 0.0634 | 0.0795 | 0.0602 |
+| 2014 | 0.0453 | 0.0868 | 0.0460 |
+| 2015 | 0.0571 | 0.1015 | 0.0358 |
+| 2016 | 0.0374 | 0.0773 | 0.0435 |
+| 2017 | 0.0605 | 0.0938 | 0.0567 |
+| 2018 | 0.0571 | 0.0575 | 0.0473 |
+| 2019 | 0.0544 | 0.0736 | 0.0466 |
+| 2020 | 0.0412 | 0.0644 | 0.0374 |
+| 2021 | 0.0350 | 0.0397 | 0.0337 |
+| 2022 | 0.0586 | 0.0652 | 0.0504 |
+| 2023 | 0.0265 | 0.0418 | 0.0300 |
+| 2024 | 0.0532 | 0.0654 | 0.0412 |
+| 2025 | 0.0476 | 0.0725 | 0.0379 |
+
+**逐年等权 H–L Sharpe**（完整表见 `expanding_window/eval/portfolio/yearly_ew_hl_sharpe.csv`）：三者均有年际波动；2023 最弱（chart ≈ 0）；细节不在此重复。
+
+**与训练长度的关系**（train 年数 = y−2002，由 6 增至 23）
+
+| 模型 | Spearman(train_len, Rank IC) | Spearman(train_len, EW H–L Sharpe) |
+|---|---:|---:|
+| chart | −0.38（不显著） | −0.59 |
+| oned | −0.60 | −0.60 |
+| mlp | −0.70 | −0.69 |
+
+chart 前半窗（2008–2016）Rank IC 均值 0.052，后半（2017–2025）0.048。
+
+**固化结论（稳健性，不改主规格）**
+
+1. 在固定 registry 超参下，扩展训练期 **不能抬升** chart-CNN 的 OOS Rank IC 或等权 H–L Sharpe；样本内偏短 **不是** chart 相对偏弱的主要解释。
+2. 同一扩展窗设定下，**1D-CNN-140 全程强于 chart 与 MLP**（全样本 Rank IC 与 H–L Sharpe 均最高）。
+3. 三者 OOS 信号均为正且统计上很强（NW-t 均 ≫ 2）；效果有年际波动，近年偏弱，但方向仍为正。
+4. 本结果只作稳健性附录/正文稳健性句；**不据此重搜参、不更换主模型、不改主切分**。
+5. 主规格 registry 的固定切分 OOS parquet 当时尚未落盘，故未做与主表预测的逐点数值对照；y=2008 窗的切分设定与主规格一致，仅作设定对齐参考。
+
+**产物索引**
+
+- 逐年预测：`WORK_SPACE/paper/expanding_window/{chart,oned,mlp}/y{YYYY}/`
+- 拼接与指标：`WORK_SPACE/paper/expanding_window/eval/`（`summary.md`、`yearly_rank_ic.csv`、`portfolio/sharpe_summary.md`、`audit_report.md`）
 
