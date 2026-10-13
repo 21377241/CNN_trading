@@ -8,7 +8,7 @@
 - **S0 切分已完成并登记**（训练 2000–2005、验证 2006–2007、OOS 2008–2026.9）：`chartcnn_clean`、`onedcnn_140`、`mlp_140`，见 `WORK_SPACE/paper/registry_v2.json` 和 clean_spec 第 9 节“2026-10-13 C3 完成”。
 - **主分析已改为扩展窗口（EW）**，S0 与 S1 为稳健性检验，E2G、E2F 也在 EW 上做：clean_spec 第 9 节“2026-10-13 主分析改为扩展窗口”。EW 与 S1 都还没有任何训练。
 - 干净数据上**还没有计算过任何 OOS 指标**。
-- C3 影响报告（M1 − M0、M2 − M1）在原机器上做，新环境不做。
+- C3 影响报告（M1 − M0、M2 − M1）在原机器上做，新环境不做。两台机器的分工见第 6 节。
 
 ## 2. 必须遵守的约束
 
@@ -66,3 +66,18 @@
 | 登记 | `ashare_train/build_registry_v2.py` |
 | 数据清单 | `ashare_train/data_manifest.py` |
 | 路径配置 | `trend_submit/trend_code_submit/Misc/config.py`（`WORK_SPACE` 或环境变量 `CNN_TRADING_WORK_DIR`） |
+
+## 6. 两台机器的分工与同步
+
+代码同时在原机器（Windows，RTX 3060）和容器上修改，通过 GitHub 的 `clean-data` 分支同步。
+
+| | 负责 | 修改的文件 |
+|---|---|---|
+| 容器 | 第 4 节 A–E 的全部代码与训练 | `ashare_train/`、`experiments/`、`trend_submit/` 下的代码与配置（下面列给原机器的除外），新增的协议文档 |
+| 原机器 | C3 影响报告；第二个数据包及其清单 | `experiments/E1_image_baseline/eval_clean_cnn_impact.py`、`docs/figures/clean_cnn_impact_*`、`docs/results/clean_cnn_impact.md`、`ashare_train/data_manifest.py` |
+
+- 两边都会在 clean_spec 第 9 节末尾追加记录。
+- 每次开始工作前先 `git pull --rebase origin clean-data`。小步提交，提交后立即推送；不用 `--force`。
+- clean_spec 冲突时保留双方的记录，按日期排列，不改对方的内容。
+- 需要改对方负责的文件时，先告诉用户。
+- `WORK_SPACE/` 不进 git。训练产物留在容器上；需要给原机器的结果，按 `data_manifest.py` 的方式打包并核对 sha1。
