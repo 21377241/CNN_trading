@@ -5,6 +5,7 @@ data_manifest.py - 迁移训练数据时的文件清单与校验（docs/migratio
   python ashare_train/data_manifest.py --write   # 本机：写 WORK_SPACE/migration_manifest.json
   python ashare_train/data_manifest.py --check   # 新机器：逐个文件核对大小与 sha1
   --set s0：S0 的登记预测、搜参记录与全部权重，清单为 WORK_SPACE/migration_manifest_s0.json
+  --set analysis：E7、E9、E10 所需的日度面板、股票信息、PIT 基本面、市场与 CH 因子，清单为 migration_manifest_analysis.json
 """
 from __future__ import annotations
 
@@ -30,6 +31,9 @@ SETS = {
         'paper/registry_v2',
         'paper/E1c_cnn_hp_I20R5_clean',
         'paper/hp_numeric_140',
+    ]),
+    'analysis': ('migration_manifest_analysis.json', [
+        'data/ashare_processed_data',
     ]),
 }
 
