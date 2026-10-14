@@ -1,0 +1,50 @@
+# chart-CNN 与数值模型程序对称的搜参（互补/机制主张下的公平基线）。
+# 与 config_cnn_hp_clean.yaml 同网格与切分；差异：
+#   - phase1 mode=factorial：lr×dropout×patience 全组合，各组用自身 patience（不用 patience_override=1）
+#   - phase2：前 3 + 锚点，各 5 seed；选定用 5 个成员验证 Rank IC 均值（run_cnn_trial clean 已取均值）
+#   - 输出目录独立，不覆盖旧顺序三阶段结果
+spec: I20R5_clean
+window_size: 20
+predict_window: 5
+freq: week
+country: CHN
+
+search_metric: val_rank_ic
+training: clean
+monitor: rank_ic
+run_portfolio_analysis: false
+
+train_years: [2000, 2001, 2002, 2003, 2004, 2005]
+val_years: [2006, 2007]
+oos_years: [2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026]
+
+dataset_subdir: I20R5_clean
+out_root: WORK_SPACE/paper/E1c_cnn_hp_I20R5_clean_sym
+
+batch_size: 128
+max_epochs: 50
+n_ensembles_full: 5
+
+anchor:
+  lr: 1.0e-5
+  dropout: 0.50
+  patience: 2
+
+grid:
+  lr: [3.0e-6, 1.0e-5, 3.0e-5, 1.0e-4]
+  dropout: [0.40, 0.50, 0.60]
+  patience: [2, 5]
+
+phases:
+  phase1:
+    mode: factorial
+    n_ensembles: 1
+  phase2:
+    n_ensembles: 5
+    top_k: 3
+    use_grid_patience: true
+  phase3:
+    n_ensembles: 5
+    top_k: 2
+    val_metric_gap_for_top2: 0.002
+    always_full_train_anchor_if_not_in_top: true

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -26,7 +27,9 @@ from Misc.config import ASHARE_PANEL_PATH, ASHARE_PROCESSED_DATA_DIR, ASHARE_STO
 DATA = Path(ASHARE_PROCESSED_DATA_DIR)
 EXT_PANEL = Path(ASHARE_PANEL_PATH)
 STOCK_INFO = Path(ASHARE_STOCK_INFO_PATH)
-OUT = PROJECT_ROOT / 'WORK_SPACE' / 'paper' / 'E7_incremental'
+# 主分析 E7 输出（EW 拼接预测）；旧 S0 固定切分结果仍可指向 E7_incremental（见 E7_USE_EW=0）
+_USE_EW = os.environ.get('E7_USE_EW', '1') != '0'
+OUT = PROJECT_ROOT / 'WORK_SPACE' / 'paper' / ('E7_incremental_v2' if _USE_EW else 'E7_incremental')
 OUT_DATA = OUT / 'data'
 WEEKLY_RETURNS = OUT_DATA / 'weekly_returns.feather'
 WEEKLY_CONTROLS = OUT_DATA / 'weekly_controls.feather'
@@ -34,13 +37,15 @@ WEEKLY_CONTROLS = OUT_DATA / 'weekly_controls.feather'
 KEYS = ['StockID', 'ending_date']
 OOS_START, OOS_END = pd.Timestamp('2008-01-01'), pd.Timestamp('2026-09-30')
 
-# Canonical OOS predictions of the clean models (clean_spec 5.4 and section 9, "C3 训练前补充"): parquet path relative to
-# PROJECT_ROOT and full sha1, frozen in registry v2 by ashare_train/build_registry_v2.py. Nothing is read before the
-# registry exists.
+# Canonical OOS：主分析用 EW 拼接（clean_spec 2026-10-13/14）；E7_USE_EW=0 时回退 S0 固定切分 registry 名。
 REGISTRY_V2 = PROJECT_ROOT / 'WORK_SPACE' / 'paper' / 'registry_v2.json'
 SCORES = ['s_chart', 's_1d', 's_mlp4']
 CHART_S = 's_chartS'
-REGISTRY_NAMES = {'s_chart': 'chartcnn_clean', 's_1d': 'onedcnn_140', 's_mlp4': 'mlp_140', CHART_S: 'chartcnn_s'}
+REGISTRY_NAMES = (
+    {'s_chart': 'chartcnn_ew', 's_1d': 'onedcnn_140_ew', 's_mlp4': 'mlp_140_ew', CHART_S: 'chartcnn_s'}
+    if _USE_EW else
+    {'s_chart': 'chartcnn_clean', 's_1d': 'onedcnn_140', 's_mlp4': 'mlp_140', CHART_S: 'chartcnn_s'}
+)
 
 
 def _registry() -> dict:
@@ -80,7 +85,7 @@ def load_prediction(name: str) -> pd.DataFrame:
     if got != expected:
         raise RuntimeError(f'{name}: sha1 {got} != registry {expected} ({path})')
     df = pd.read_parquet(path, columns=KEYS + ['up_prob'])
-    df['StockID'] = df['StockID'].astype(str)
+    df['StockID'] = df['StockID'].astype(str).str.zfill(6)
     df['ending_date'] = pd.to_datetime(df['ending_date'])
     return df.rename(columns={'up_prob': name})
 
@@ -90,7 +95,8 @@ def load_canonical_preds() -> pd.DataFrame:
     from Misc.config import ASHARE_UNIVERSE_PATH
     out = pd.read_feather(ASHARE_UNIVERSE_PATH, columns=KEYS + ['split', 'ret_label'])
     out = out[out['split'] == 'oos'].drop(columns='split').rename(columns={'ret_label': 'ret_val'})
-    out['StockID'] = out['StockID'].astype(str)
+    out['StockID'] = out['StockID'].astype(str).str.zfill(6)
+    out['ending_date'] = pd.to_datetime(out['ending_date'])
     for name in SCORES:
         out = out.merge(load_prediction(name), on=KEYS, how='inner')
     return out

@@ -23,6 +23,8 @@ import pandas as pd
 import yaml
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 CODE_PKG = os.path.join(PROJECT_ROOT, 'trend_submit', 'trend_code_submit')
 if CODE_PKG not in sys.path:
     sys.path.insert(0, CODE_PKG)
@@ -122,10 +124,43 @@ def _best_dropout(rows: list, lr: float, metric_col: str) -> float:
     return float(sub.loc[sub[metric_col].idxmax(), 'dropout'])
 
 
+def run_phase1_factorial(cfg, dataset_dir, out_root, force: bool) -> pd.DataFrame:
+    """与数值模型对称：全网格 × 各组自身 patience，seed/ensemble 数由 phase1.n_ensembles 决定。"""
+    grid = cfg['grid']
+    p1 = cfg['phases']['phase1']
+    metric_col = _metric_col(cfg)
+    rows = []
+    n = 0
+    for lr in grid['lr']:
+        for dp in grid['dropout']:
+            for pat in grid['patience']:
+                n += 1
+                rows.append(_run_trial(
+                    cfg, float(lr), float(dp), int(pat), int(pat), p1['n_ensembles'],
+                    dataset_dir, out_root, 'factorial', f'p1_{n:02d}', '1', force,
+                ))
+                logging.info(
+                    f'phase1 factorial {n}/{len(grid["lr"])*len(grid["dropout"])*len(grid["patience"])} '
+                    f'lr={lr:g} dp={dp} p={pat} {metric_col}={rows[-1].get(metric_col)}'
+                )
+    df = pd.DataFrame(rows)
+    path = os.path.join(out_root, 'search_phase1.csv')
+    df.to_csv(path, index=False, float_format='%.6g')
+    logging.info(
+        f'wrote {path}  best_{metric_col}={df[metric_col].max():.4f}  '
+        f'(search_metric={cfg.get("search_metric")} mode=factorial)'
+    )
+    return df
+
+
 def run_phase1(cfg, dataset_dir, out_root, force: bool) -> pd.DataFrame:
+    p1 = cfg['phases']['phase1']
+    mode = str(p1.get('mode', 'sequential')).lower()
+    if mode in ('factorial', 'symmetric', 'full_grid'):
+        return run_phase1_factorial(cfg, dataset_dir, out_root, force)
+
     grid = cfg['grid']
     anchor = cfg['anchor']
-    p1 = cfg['phases']['phase1']
     coarse_patience = int(p1.get('patience_override', 1))
     metric_col = _metric_col(cfg)
     rows = []
@@ -319,22 +354,59 @@ def run_phase3(cfg, dataset_dir, out_root, force: bool) -> pd.DataFrame:
     return df
 
 
+def _apply_retrain_year(cfg: dict, retrain_year: int) -> tuple[dict, str]:
+    """主分析 EW：按 R 改切分，写动态 embargo overlay，输出到 ew_main/R{R}/chart。"""
+    from ashare_train.ew_panel import prepare_chart_overlay
+    from ashare_train.ew_splits import assert_fair_split, ew_split
+
+    split = ew_split(retrain_year)
+    assert_fair_split(split)
+    cfg = dict(cfg)
+    cfg['train_years'] = list(split['train_years'])
+    cfg['val_years'] = list(split['val_years'])
+    cfg['oos_years'] = list(split['pred_years'])
+    cfg['out_root'] = f'WORK_SPACE/paper/ew_main/R{retrain_year}/chart'
+    # phase1 必须 factorial（对称）
+    cfg.setdefault('phases', {}).setdefault('phase1', {})['mode'] = 'factorial'
+    out_root = os.path.join(PROJECT_ROOT, cfg['out_root'].replace('/', os.sep))
+    os.makedirs(out_root, exist_ok=True)
+    overlay = prepare_chart_overlay(
+        {'train_years': cfg['train_years'], 'val_years': cfg['val_years'],
+         'pred_years': cfg['oos_years']},
+        os.path.join(out_root, 'dataset_overlay'),
+    )
+    split_path = os.path.join(out_root, 'split.json')
+    with open(split_path, 'w', encoding='utf-8') as f:
+        import json
+        json.dump({**split, 'overlay': str(overlay)}, f, indent=2)
+    return cfg, str(overlay)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', default=DEFAULT_CONFIG)
     parser.add_argument('--phase', choices=['1', '2', '3', 'all'], default='1')
     parser.add_argument('--force', action='store_true', help='忽略已有 checkpoint 重训')
+    parser.add_argument('--retrain-year', type=int, default=None,
+                        help='主分析 EW 重训年 R；改切分并写动态 embargo overlay')
     args = parser.parse_args()
 
     cfg = load_config(args.config)
+    dataset_dir_override = None
+    if args.retrain_year is not None:
+        cfg, dataset_dir_override = _apply_retrain_year(cfg, args.retrain_year)
+
     out_root = os.path.join(PROJECT_ROOT, cfg['out_root'].replace('/', os.sep))
     os.makedirs(out_root, exist_ok=True)
     # copy config snapshot
     try:
         import shutil
         cfg_dst = os.path.join(out_root, 'config_cnn_hp.yaml')
-        if os.path.isfile(args.config) and not os.path.isfile(cfg_dst):
-            shutil.copy2(args.config, cfg_dst)
+        with open(cfg_dst, 'w', encoding='utf-8') as f:
+            yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
+        if os.path.isfile(args.config) and args.retrain_year is None and not os.path.isfile(
+                os.path.join(out_root, 'config_cnn_hp_src.yaml')):
+            shutil.copy2(args.config, os.path.join(out_root, 'config_cnn_hp_src.yaml'))
     except OSError:
         pass
     logging.basicConfig(
@@ -350,8 +422,11 @@ def main():
         ],
     )
 
-    base_save = os.path.join(ASHARE_STOCKS_SAVEPATH, cfg['dataset_subdir'])
-    dataset_dir = get_dataset_dir(ASHARE_COUNTRY, base_savepath=base_save)
+    if dataset_dir_override:
+        dataset_dir = dataset_dir_override
+    else:
+        base_save = os.path.join(ASHARE_STOCKS_SAVEPATH, cfg['dataset_subdir'])
+        dataset_dir = get_dataset_dir(ASHARE_COUNTRY, base_savepath=base_save)
     ws, pw, freq = cfg['window_size'], cfg['predict_window'], cfg['freq']
 
     def available(years):
@@ -373,7 +448,8 @@ def main():
     logging.info(f'out_root={out_root}  dataset={dataset_dir}')
     logging.info(
         f'train={cfg["train_years"]}  val={cfg["val_years"]}  '
-        f'oos={len(cfg["oos_years"])} yrs  search_metric={cfg.get("search_metric")}'
+        f'oos={len(cfg["oos_years"])} yrs  search_metric={cfg.get("search_metric")} '
+        f'retrain_year={args.retrain_year}'
     )
     if args.phase in ('1', 'all'):
         run_phase1(cfg, dataset_dir, out_root, args.force)
