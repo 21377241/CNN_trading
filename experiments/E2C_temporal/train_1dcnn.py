@@ -43,6 +43,23 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
+def channel_stats(X_seq: np.ndarray, chunk: int = 1 << 20) -> tuple[np.ndarray, np.ndarray]:
+    """Per-channel mean and std (ddof=0, + 1e-6) over (samples, time) of an (N, T, C) array.
+
+    Accumulated in float64: a float32 running sum stops growing at 2**24, which corrupts the statistics once
+    N * T exceeds about 16.8 million cells per channel."""
+    flat = X_seq.reshape(-1, X_seq.shape[-1])
+    s1 = np.zeros(flat.shape[1])
+    s2 = np.zeros(flat.shape[1])
+    for a in range(0, len(flat), chunk):
+        c = flat[a:a + chunk].astype(np.float64)
+        s1 += c.sum(axis=0)
+        s2 += (c * c).sum(axis=0)
+    mean = s1 / len(flat)
+    std = np.sqrt(np.maximum(s2 / len(flat) - mean ** 2, 0.0)) + 1e-6
+    return mean.astype(np.float32), std.astype(np.float32)
+
+
 class SeqDataset(Dataset):
     def __init__(self, X: np.ndarray, y: np.ndarray, idx: np.ndarray, mean: np.ndarray, std: np.ndarray,
                  window_size: int, per_day: int):
@@ -150,8 +167,7 @@ def fit_seed(cfg: dict, seed: int, X_is: np.ndarray, y_is: np.ndarray, meta_is: 
         device = torch.device(device_name)
 
     X_train_seq = np.asarray(X_is[tr_idx], dtype=np.float32).reshape(len(tr_idx), window_size, per_day)
-    mean = X_train_seq.mean(axis=(0, 1), keepdims=False)
-    std = X_train_seq.std(axis=(0, 1), keepdims=False) + 1e-6
+    mean, std = channel_stats(X_train_seq)
 
     train_ds = SeqDataset(X_is, y_is, tr_idx, mean, std, window_size, per_day)
     val_ds = SeqDataset(X_is, y_is, va_idx, mean, std, window_size, per_day)
@@ -234,6 +250,7 @@ def fit_seed(cfg: dict, seed: int, X_is: np.ndarray, y_is: np.ndarray, meta_is: 
             'stopped_epoch': int(history[-1]['epoch']) if history else 0,
             'best_val_loss': float(best_val.loss) if best_val else float('nan'),
             'best_val_rank_ic': float(best_val.rank_ic) if best_val else float('nan'),
+            'norm_accumulator': 'float64',
             'n_parameters': int(sum(p.numel() for p in model.parameters()))}
     with open(os.path.join(seed_dir, 'info.json'), 'w', encoding='utf-8') as f:
         json.dump(info, f, indent=2)
