@@ -1,0 +1,124 @@
+{
+  "design_sizes": {
+    "base|Chart-CNN": {
+      "rows": 2930594,
+      "weeks": 955,
+      "n_regressors": 2
+    },
+    "base|1D-CNN": {
+      "rows": 2930594,
+      "weeks": 955,
+      "n_regressors": 2
+    },
+    "base|MLP": {
+      "rows": 2930594,
+      "weeks": 955,
+      "n_regressors": 2
+    },
+    "others|Chart-CNN": {
+      "rows": 2930594,
+      "weeks": 955,
+      "n_regressors": 4
+    },
+    "others|1D-CNN": {
+      "rows": 2930594,
+      "weeks": 955,
+      "n_regressors": 4
+    },
+    "others|MLP": {
+      "rows": 2930594,
+      "weeks": 955,
+      "n_regressors": 4
+    },
+    "base_e7|Chart-CNN": {
+      "rows": 2745114,
+      "weeks": 954,
+      "n_regressors": 2
+    },
+    "base_e7|1D-CNN": {
+      "rows": 2745114,
+      "weeks": 954,
+      "n_regressors": 2
+    },
+    "base_e7|MLP": {
+      "rows": 2745114,
+      "weeks": 954,
+      "n_regressors": 2
+    },
+    "ctrl|Chart-CNN": {
+      "rows": 2745114,
+      "weeks": 954,
+      "n_regressors": 17
+    },
+    "ctrl|1D-CNN": {
+      "rows": 2745114,
+      "weeks": 954,
+      "n_regressors": 17
+    },
+    "ctrl|MLP": {
+      "rows": 2745114,
+      "weeks": 954,
+      "n_regressors": 17
+    },
+    "ctrl_others|Chart-CNN": {
+      "rows": 2745114,
+      "weeks": 954,
+      "n_regressors": 19
+    },
+    "ctrl_others|1D-CNN": {
+      "rows": 2745114,
+      "weeks": 954,
+      "n_regressors": 19
+    },
+    "ctrl_others|MLP": {
+      "rows": 2745114,
+      "weeks": 954,
+      "n_regressors": 19
+    }
+  },
+  "identity_check_base": {
+    "Chart-CNN": {
+      "max_abs_diff_beta1_vs_formula": 8.881784197001252e-16,
+      "mean_D=IC1-rho*IC0": 0.01271322685501316,
+      "mean_rho": 0.07372707429935829,
+      "mean_IC0": 0.047641222320005686,
+      "mean_IC1": 0.016323100199753388
+    },
+    "1D-CNN": {
+      "max_abs_diff_beta1_vs_formula": 1.1657341758564144e-15,
+      "mean_D=IC1-rho*IC0": 0.00020770998524623736,
+      "mean_rho": 0.3833788039607411,
+      "mean_IC0": 0.07082231706044216,
+      "mean_IC1": 0.02625653919785671
+    },
+    "MLP": {
+      "max_abs_diff_beta1_vs_formula": 1.4988010832439613e-15,
+      "mean_D=IC1-rho*IC0": 0.014238470926606973,
+      "mean_rho": 0.050653867274190814,
+      "mean_IC0": 0.04938598608818097,
+      "mean_IC1": 0.017432925367350752
+    }
+  },
+  "bootstrap": {
+    "reps": 2000,
+    "block_weeks": 8,
+    "seed": 20261015
+  },
+  "controls": [
+    "rev_1w",
+    "ret_20d",
+    "max_20d",
+    "vol_20d",
+    "vtrend",
+    "range_20d",
+    "clv_20d",
+    "ma_gap",
+    "mom_12_1",
+    "size",
+    "turn_20d",
+    "illiq_20d",
+    "ivol_20d",
+    "bm",
+    "ep"
+  ]
+}
