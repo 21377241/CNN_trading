@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>同一价量、不同编码：A 股 chart-CNN vs 1D-CNN vs MLP 实验报告</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --ink: #1f2933; --muted: #64707d; --line: #e3e7ec;
+    --chart: #e8833a; --oned: #2f6fdb; --mlp: #2e9e6b; --chs: #f3b47e; --chm: #b9541a;
+    --good: #1e8e5a; --bad: #c8463d; --warn: #c88a12; --accent: #2f6fdb;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+         color: var(--ink); background: var(--bg); line-height: 1.65; font-size: 15px; }
+  a { color: var(--accent); text-decoration: none; }
+  code { background: #eef1f5; padding: 1px 5px; border-radius: 4px; font-size: 0.88em; }
+  .layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); min-height: 100vh; }
+  nav { position: sticky; top: 0; height: 100vh; overflow-y: auto; background: #1d2633; color: #cfd6df; padding: 22px 16px; }
+  nav h2 { font-size: 14px; color: #fff; margin: 0 0 14px; letter-spacing: .5px; }
+  nav a { display: block; color: #b7c1cc; padding: 5px 8px; border-radius: 6px; font-size: 13.5px; }
+  nav a:hover, nav a.active { background: #2c3a4d; color: #fff; }
+  nav a.sub { padding-left: 22px; font-size: 12.8px; }
+  main { padding: 28px 40px 80px; max-width: 1180px; width: 100%; margin: 0 auto; min-width: 0; }
+  section, header.hero { overflow: hidden; }
+  .grid2 > *, .grid3 > *, .kpis > * { min-width: 0; }
+  .chart { overflow: hidden; }
+  .chart svg { display: block; width: 100%; height: auto; }
+  table { table-layout: auto; word-break: break-word; }
+  header.hero { background: linear-gradient(135deg, #1d2633 0%, #2b4a7a 100%); color: #fff; border-radius: 14px; padding: 30px 34px; margin-bottom: 26px; }
+  header.hero h1 { margin: 0 0 8px; font-size: 25px; }
+  header.hero p { margin: 4px 0; color: #d6e0ee; }
+  .tag { display: inline-block; font-size: 12px; padding: 2px 9px; border-radius: 99px; background: rgba(255,255,255,.15); margin-right: 6px; }
+  section { background: var(--card); border-radius: 12px; padding: 24px 28px; margin-bottom: 22px; box-shadow: 0 1px 2px rgba(16,24,40,.05); }
+  section h2 { margin: 0 0 6px; font-size: 21px; }
+  section h3 { margin: 22px 0 8px; font-size: 17px; }
+  .lead { color: var(--muted); margin-top: 0; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin: 16px 0 4px; }
+  .kpi { border: 1px solid var(--line); border-radius: 10px; padding: 14px; background: #fbfcfd; }
+  .kpi .n { font-size: 12px; color: var(--muted); }
+  .kpi .v { font-size: 22px; font-weight: 700; margin: 2px 0; }
+  .kpi .d { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+  .finding { display: grid; grid-template-columns: 34px 1fr; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+  .finding:first-of-type { border-top: none; }
+  .finding .num { width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; }
+  .finding b { display: block; margin-bottom: 2px; }
+  .oneliner { background: #eef4ff; border-left: 4px solid var(--accent); padding: 14px 18px; border-radius: 6px; margin-top: 14px; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 6px; font-size: 14px; }
+  th, td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { background: #f3f5f8; font-weight: 600; font-size: 13px; color: #3c4752; }
+  td.r, th.r { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.hl td { background: #f2f7ff; font-weight: 600; }
+  .badge { display: inline-block; padding: 1px 9px; border-radius: 99px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+  .b-good { background: #e3f4ea; color: var(--good); }
+  .b-bad { background: #fbe7e5; color: var(--bad); }
+  .b-warn { background: #fdf2dc; color: var(--warn); }
+  .b-neu { background: #edf0f4; color: #4b5663; }
+  .box { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; background: #fbfcfd; }
+  .box h4 { margin: 0 0 6px; font-size: 15px; }
+  .why { background: #fff8ec; border-left: 4px solid var(--warn); padding: 10px 14px; border-radius: 6px; margin: 10px 0; }
+  .meaning { background: #eefaf3; border-left: 4px solid var(--good); padding: 10px 16px; border-radius: 6px; margin: 12px 0 4px; }
+  .meaning ul { margin: 4px 0; padding-left: 20px; }
+  .chart { width: 100%; }
+  .chart-title { font-size: 13.5px; font-weight: 600; color: #3c4752; margin: 14px 0 2px; }
+  .chart-note { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12.5px; color: #3c4752; margin: 4px 0; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  .model-card { border-radius: 10px; padding: 14px 16px; color: #1f2933; border: 1px solid var(--line); border-top: 5px solid; }
+  .model-card .p { font-size: 22px; font-weight: 700; }
+  .timeline { font-size: 12px; margin-top: 8px; }
+  .tl-row { display: grid; grid-template-columns: 70px 1fr; align-items: center; margin: 3px 0; }
+  .tl-bar { display: grid; grid-template-columns: repeat(27, 1fr); gap: 1px; height: 20px; }
+  .tl-bar span { border-radius: 2px; }
+  .tl-axis { display: grid; grid-template-columns: 70px 1fr; color: var(--muted); }
+  .tl-axis .ticks { display: grid; grid-template-columns: repeat(27, 1fr); }
+  .tl-axis .ticks span { font-size: 10.5px; text-align: center; }
+  details { border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; margin: 8px 0; background: #fbfcfd; }
+  details summary { cursor: pointer; font-weight: 600; }
+  .muted { color: var(--muted); }
+  svg text { font-family: inherit; }
+  .tip { position: fixed; pointer-events: none; background: rgba(29,38,51,.94); color: #fff; padding: 6px 10px; border-radius: 6px; font-size: 12.5px; display: none; z-index: 10; white-space: nowrap; }
+  @media (max-width: 1000px) {
+    .layout { grid-template-columns: 1fr; } nav { display: none; }
+    main { padding: 16px; } .grid2, .grid3, .kpis { grid-template-columns: minmax(0, 1fr); }
+  }
+</style>
+</head>
+<body>
+<div class="tip" id="tip"></div>
+<div class="layout">
+<nav>
+  <h2>实验报告导航</h2>
+  <a href="#summary">0. 一页摘要</a>
+  <a href="#design">1. 研究设计</a>
+  <a class="sub" href="#models">1.2 三个模型</a>
+  <a class="sub" href="#windows">1.3 扩展窗口</a>
+  <a class="sub" href="#exps">1.4 实验清单</a>
+  <a href="#metrics">2. 指标怎么读</a>
+  <a href="#main">3.1 主表：预测力</a>
+  <a href="#s0s1">3.2 S0 / S1 稳健性</a>
+  <a href="#e2g">3.3 E2G 参数量对标</a>
+  <a href="#e7">3.4 E7 增量信息</a>
+  <a href="#e9">3.5 E9 可实现收益</a>
+  <a href="#e10">3.6 E10 组合合并</a>
+  <a href="#anomaly">4. 反常现象与排查</a>
+  <a href="#reliability">5. 结论可靠性</a>
+  <a href="#story">6. 论文故事</a>
+  <a href="#next">7. 下一步</a>
+  <a href="#index">8. 产出索引</a>
+</nav>
+
+<main>
+<header class="hero">
+  <h1>同一价量，不同编码：A 股 chart-CNN、1D-CNN 与 MLP</h1>
+  <p>干净数据（CSMAR）· 三年一窗扩展窗口 · 三模型对称调参 · 样本外 2008-01 至 2026-09（959 周、303 万股票-周）</p>
+  <p style="margin-top:10px"><span class="tag">写于 2026-10-15</span><span class="tag">协议 tag protocol-clean-v1</span><span class="tag">作业 31675 / 31761 / 31770 / 31772 / 31828 / 31829</span><span class="tag">E9/E10 已按印花税修正重跑</span></p>
+</header>
+<div class="box" style="border-left:4px solid var(--warn);margin:14px 0"><b>2026-10-15 更正</b>：E11 审计发现 E9 印花税实现与协议不一致（漏收 2008-09-18 前的买入印花税；税率按信号日而非成交日判断）。已按协议修正并重跑 E9、E10，本页 E9/E10 数字均为修正后结果。修正只改变 38 周的成本，但 1D-CNN 净超额 t 由 3.01 降至 2.85，判定由"可实现"变为"弱证据"。</div>
+
+<!-- ============ 0 摘要 ============ -->
+<section id="summary">
+  <h2>0. 一页摘要</h2>
+  <p class="lead"><b>研究问题</b>：同一段 20 个交易日的 OHLCV，画成 K 线图交给图像 CNN（Jiang, Kelly &amp; Xiu 2023），与直接作为数值序列交给 1D-CNN 或 MLP，哪种编码对 A 股下周收益更有用？图像模型能否提供数值模型之外、并在交易成本后仍能兑现的信息？</p>
+
+  <div class="kpis">
+    <div class="kpi"><div class="n">样本外 Rank IC</div><div class="v" style="color:var(--oned)">0.072</div><div class="d">1D-CNN；chart 0.048、MLP 0.049</div></div>
+    <div class="kpi"><div class="n">同参数量下 1D 领先 chart</div><div class="v">+0.025</div><div class="d">t = 12.0（E2G）</div></div>
+    <div class="kpi"><div class="n">chart 相对 1D 的独立信息</div><div class="v" style="color:var(--warn)">3.6%/年</div><div class="d">t = 3.18，刚过门槛（E7）</div></div>
+    <div class="kpi"><div class="n">1D 多头净超额</div><div class="v" style="color:var(--warn)">+4.5%/年</div><div class="d">t = 2.85，弱证据；chart、MLP 为负；1D − chart t = 6.0（E9）</div></div>
+    <div class="kpi"><div class="n">1D + chart 合并</div><div class="v" style="color:var(--bad)">0.54</div><div class="d">净 Sharpe，低于单独 1D 的 0.70（E10）</div></div>
+  </div>
+
+  <h3>核心结论</h3>
+  <div class="finding"><div class="num">1</div><div><b>1D-CNN 全面领先。</b>三个模型在每个窗口按同一规程调参后，样本外周度 Rank IC：1D-CNN 0.072、chart 0.048、MLP 0.049。每个窗口的验证期也是 1D 最高；换不同训练期（S0/S1）排序不变。</div></div>
+  <div class="finding"><div class="num">2</div><div><b>chart 落后是编码问题，不是参数太多。</b>把 chart-CNN 缩到与 1D、MLP 相同参数量（E2G），差距几乎不变（1D 仍高 0.025，t=12）。</div></div>
+  <div class="finding"><div class="num">3</div><div><b>控制传统因子后三个模型都有增量；chart 相对 1D 的独立信息很弱。</b>控制 15 个价量与公司特征后三者都显著（H1）。chart 与 1D 同放时 chart 仍显著但 t=3.18，量级约为 1D 的七分之一，且 2014 年后不再显著（H2）。</div></div>
+  <div class="finding"><div class="num">4</div><div><b>交易成本后只有 1D-CNN 还剩正收益，但证据偏弱；1D 对 chart 的优势则很确定。</b>按 A 股执行规则和 10 bp 冲击成本做多头，三者毛超额都显著；扣成本后 chart、MLP 转负，1D 年化约 +4.5%（t=2.85，弱证据）。1D 相对 chart 的净优势每周 0.15%（t=6.0），约三分之二来自更高的毛收益、三分之一来自更低的换手成本（E9、E11）。</div></div>
+  <div class="finding"><div class="num">5</div><div><b>chart 与 1D 合并没有好处。</b>等权合并后净表现反而不如单独 1D（E10）。</div></div>
+
+  <div class="oneliner"><b>一句话：</b>在 A 股短窗口价量预测上，决定效果的是输入编码而不是模型规模；图像模型的独立信息在统计上勉强存在，但既不稳定，也无法在成本后兑现，不能通过合并带来增益。</div>
+</section>
+
+<!-- ============ 1 设计 ============ -->
+<section id="design">
+  <h2>1. 研究设计</h2>
+  <h3>1.1 数据与样本</h3>
+  <table>
+    <tr><th style="width:140px">项</th><th>内容</th></tr>
+    <tr><td>数据源</td><td>CSMAR 日行情（后复权价格、成交量、流通市值、换手率等），2000 年起</td></tr>
+    <tr><td>信号日</td><td>每个 ISO 周的最后一个交易日，记为 t</td></tr>
+    <tr><td>股票池</td><td>t 日有交易、非 ST、上市已超过 39 个交易日（保证 20 日窗口与 20 日均线完整）</td></tr>
+    <tr><td>预测目标</td><td>t 日收盘到下一个信号日收盘的周收益；训练标签为"是否上涨"（二分类）</td></tr>
+    <tr><td>样本外</td><td>2008-01-04 至 2026-09-24，959 周、3,034,729 个股票-周（平均每周约 3,200 只）</td></tr>
+  </table>
+  <p class="muted">数据已系统清理：不裁剪收益、按市场交易日取窗口、停牌日留空、成交量按送转复权、K 线渲染与 Jiang 官方代码逐像素一致（<code>clean_spec.md</code> 第 2 节）。旧数据结果不再引用。</p>
+
+  <h3 id="models">1.2 三个模型：同一信息，不同编码</h3>
+  <p>三个模型看到<b>完全相同</b>的信息：信号日往前 20 个交易日的开、高、低、收、20 日均线、成交量。区别只在于怎么喂给模型。每个模型最终由 5 个随机种子的成员取平均，输出"下周上涨概率"。</p>
+  <div class="grid3">
+    <div class="model-card" style="border-top-color:var(--chart)"><div class="muted">chart-CNN</div><div class="p">708,866 参数</div>
+      <div>输入：64×60 黑白 K 线图（Jiang I20 画法：每天 3 列，开盘刻度、高低竖线、收盘刻度，底部成交量柱）</div>
+      <div class="muted" style="margin-top:6px">结构固定：3 层 2D 卷积（64-128-256）+ 全连接；不搜结构</div></div>
+    <div class="model-card" style="border-top-color:var(--oned)"><div class="muted">1D-CNN</div><div class="p">约 0.7 万–12.6 万</div>
+      <div>输入：20 天 × 7 个数值（O、H、L、C、MA20、成交量、当日是否交易），与图像同一坐标归一化</div>
+      <div class="muted" style="margin-top:6px">1D 时序卷积；层数与通道随窗口搜参</div></div>
+    <div class="model-card" style="border-top-color:var(--mlp)"><div class="muted">MLP</div><div class="p">约 2.6 万–2.9 万</div>
+      <div>输入：同上 140 个数值，展平为向量</div>
+      <div class="muted" style="margin-top:6px">全连接网络；层数与宽度随窗口搜参</div></div>
+  </div>
+
+  <h3 id="windows">1.3 扩展窗口与对称调参</h3>
+  <p>每隔三年用截至当时的全部历史重训，预测接下来三年，再把各窗预测拼接起来。</p>
+  <div class="legend"><span><i style="background:#a9c1e8"></i>训练</span><span><i style="background:#f2c46d"></i>验证（选超参）</span><span><i style="background:#58b483"></i>预测（样本外）</span></div>
+  <div class="timeline" id="timeline"></div>
+  <p style="margin-top:12px"><b>对称调参</b>：每个窗口内三个模型用同一程序选超参，标准都是验证期周度 Rank IC。第一阶段跑完预先定好的网格；第二阶段对前 3 名加基准组合各训练 5 个种子取平均再比。chart 搜学习率、dropout、早停耐心（24 组）；1D 和 MLP 各 36 组（含结构）。<b>唯一的不对称</b>：chart 卷积宽度固定为 Jiang 原设定，由 E2G 专门检验。</p>
+  <p><b>两个稳健性口径</b>：<b>S0</b> 只用 2008 年窗口的模型（训练 2000–2005）固定预测到 2026；<b>S1</b> 只用 2014 年窗口的模型（训练 2000–2011）固定预测 2014–2026。</p>
+
+  <h3 id="exps">1.4 实验清单</h3>
+  <table>
+    <tr><th>实验</th><th>回答的问题</th><th>方法要点</th><th>作业</th></tr>
+    <tr><td><a href="#main">主表</a></td><td>哪种编码预测力最强？</td><td>扩展窗口拼接预测的 Rank IC 与多空组合</td><td>—</td></tr>
+    <tr><td><a href="#s0s1">S0 / S1</a></td><td>结论是否依赖训练期长短？</td><td>固定训练期模型与主表对比</td><td>—</td></tr>
+    <tr><td><a href="#e2g"><b>E2G</b></a></td><td>chart 落后是不是参数太多？</td><td>把 chart 缩到与 1D、MLP 同参数量后重新调参比较</td><td>31828、31829</td></tr>
+    <tr><td><a href="#e7"><b>E7</b></a></td><td>控制传统因子后还有增量吗？chart 与 1D 信息是否各自独立？</td><td>Fama-MacBeth 回归、残差 Rank IC、条件双重排序</td><td>31675</td></tr>
+    <tr><td><a href="#e7">E7 §15</a></td><td>E7 结论是否依赖训练期？</td><td>用 S0 / S1 得分重跑 E7</td><td>31761</td></tr>
+    <tr><td><a href="#e9"><b>E9</b></a></td><td>交易约束和成本后还剩多少？</td><td>多头组合，A 股执行规则与成本下的净超额</td><td>31770；10-15 修正后重跑</td></tr>
+    <tr><td><a href="#e10"><b>E10</b></a></td><td>chart 与 1D 合起来能否更好？</td><td>等权合并得分做多头，与单独 1D 比较</td><td>31772；10-15 随 E9 重跑</td></tr>
+    <tr><td><a href="#e9"><b>E11</b></a></td><td>E9 口径是否正确？净收益差来自毛收益还是成本？</td><td>独立重算 E9，分解毛超额、佣金、印花税、冲击</td><td>本地，不训练</td></tr>
+  </table>
+  <div class="why"><b>流程纪律</b>：E7、E9、E10 的假设、规格和判定阈值在运行前写定并打 tag <code>protocol-clean-v1</code>。但打 tag 时作者已看过主表与 S0/S1 的单变量结果，因此不是完全事前的预注册，论文中只称"冻结分析方案"。E2G 的宽度规则事先写定，但在看过主表之后才运行。</div>
+</section>
+
+<!-- ============ 2 指标 ============ -->
+<section id="metrics">
+  <h2>2. 指标怎么读</h2>
+  <table>
+    <tr><th style="width:150px">指标</th><th>含义</th><th>怎么看</th></tr>
+    <tr><td><b>Rank IC</b></td><td>每周计算"模型得分排名"与"下周实际收益排名"的 Spearman 相关，再对 959 周取平均</td><td>衡量选股排序能力。周度个股收益噪声大，0.03–0.07 已属很强；差 0.01 就是明显差距</td></tr>
+    <tr><td><b>NW-t</b></td><td>对周度序列均值做 t 检验，Newey-West（滞后 4 周）修正自相关</td><td>统一用 |t| ≥ 3 为显著门槛（Harvey-Liu-Zhu 2016），同时报告 1.96</td></tr>
+    <tr><td><b>H-L 多空组合</b></td><td>每周按得分分 10 组，买最高组、卖最低组，持有一周</td><td>不计成本、假设可卖空，只是预测力的上界参考，不是可实现收益</td></tr>
+    <tr><td><b>Sharpe</b></td><td>周均收益 ÷ 周收益标准差 × √52</td><td>EW = 组内等权；VW = 按流通市值加权（大盘股权重高，通常更低）</td></tr>
+    <tr><td><b>配对差</b></td><td>两个模型每周 Rank IC 相减，对差值序列做 NW-t</td><td>判断两个模型的差距是否显著</td></tr>
+    <tr><td><b>FM 系数 β</b>（E7）</td><td>每周做截面回归（下周收益对得分和控制变量），再对系数取时间平均</td><td>变量先换成截面排名并缩放到 [−0.5, 0.5]，β = 得分最高与最低股票的周收益差（其他不变）；β × 52 ≈ 年化</td></tr>
+    <tr><td><b>残差 Rank IC</b>（E7）</td><td>把得分对全部控制变量回归取残差，再算残差与收益的 Rank IC</td><td>控制变量解释不了的那部分得分是否还有预测力</td></tr>
+    <tr><td><b>毛 / 净超额</b>（E9）</td><td>多头组合收益减全市场等权基准；净超额再扣佣金、印花税、冲击成本</td><td>净超额 t ≥ 3 判"可实现"，1.96 ≤ t &lt; 3 为"弱证据"</td></tr>
+    <tr><td><b>换手率</b>（E9）</td><td>每周新买入部分占组合的比例</td><td>0.88 表示每周约 88% 持仓被换掉；换手越高成本越重</td></tr>
+    <tr><td><b>盈亏平衡冲击</b>（E9）</td><td>使净超额恰为 0 的单边冲击成本</td><td>高于实际成本才赚钱；主口径假设 10 bp</td></tr>
+    <tr><td><b>Spanning α</b>（E10）</td><td>合并组合收益对单独 1D 组合收益回归的截距</td><td>显著为正才说明合并带来 1D 之外的收益</td></tr>
+  </table>
+  <div class="why"><b>两种收益口径</b>：主表与 S0/S1 用"t 日收盘到下周收盘"的标签收益，衡量预测力；E7、E9、E10 用"t+1 开盘买入、下个信号日后首个开盘卖出"的执行收益（<code>ret_oo</code>），并处理停牌、一字涨跌停、退市，更接近真实交易。</div>
+</section>
+
+<!-- ============ 3.1 主表 ============ -->
+<section id="main">
+  <h2>3.1 主表：哪种编码预测力最强</h2>
+  <p class="lead">扩展窗口拼接的预测，在 2008–2026 全部 959 周上计算选股能力。</p>
+  <div class="grid2">
+    <div><div class="chart-title">样本外 Rank IC</div><div class="chart" id="c-main-ic"></div></div>
+    <div><div class="chart-title">多空组合 Sharpe（EW / VW）</div><div class="chart" id="c-main-sh"></div></div>
+  </div>
+  <table>
+    <tr><th>模型</th><th class="r">Rank IC</th><th class="r">NW-t</th><th class="r">EW 多空 Sharpe</th><th class="r">EW 多空年化</th><th class="r">VW 多空 Sharpe</th></tr>
+    <tr><td>chart-CNN</td><td class="r">0.048</td><td class="r">18.1</td><td class="r">3.15</td><td class="r">36%</td><td class="r">1.18</td></tr>
+    <tr class="hl"><td>1D-CNN</td><td class="r">0.072</td><td class="r">25.2</td><td class="r">4.36</td><td class="r">54%</td><td class="r">1.96</td></tr>
+    <tr><td>MLP</td><td class="r">0.049</td><td class="r">16.7</td><td class="r">3.18</td><td class="r">35%</td><td class="r">1.07</td></tr>
+  </table>
+  <div class="chart-title">逐年 Rank IC（扩展窗口）</div>
+  <div class="chart" id="c-main-year"></div>
+  <div class="meaning"><b>含义</b><ul>
+    <li>三个模型都有很强的预测力（t 均在 16 以上），20 日价量确实包含下周收益信息。</li>
+    <li>1D-CNN 明显领先，Rank IC 比另两个高约 50%；chart 与 MLP 相当。逐年看，1D 几乎每年都最高。</li>
+    <li>三个模型得分的周截面相关只有 0.40–0.51，选出的股票有相当差异，这是后面检验"是否互补"的出发点。</li>
+    <li>多空 Sharpe 不计成本、假设可卖空，不能当作可赚的收益；可实现性见 E9。</li>
+  </ul></div>
+</section>
+
+<!-- ============ 3.2 S0S1 ============ -->
+<section id="s0s1">
+  <h2>3.2 S0 / S1：结论是否依赖训练期</h2>
+  <p class="lead">用固定训练期的模型（S0：训练到 2005；S1：训练到 2011）与主表（扩展窗口，EW）对比。</p>
+  <div class="chart-title">各口径 Rank IC</div>
+  <div class="chart" id="c-s0s1"></div>
+  <div class="chart-note">t 值均在 7 以上。左两组为 2008–2026 全样本，右三组为 2014–2026 共同样本。</div>
+  <div class="meaning"><b>含义</b><ul>
+    <li>不论训练多长，1D-CNN 都排第一，主排序稳健。</li>
+    <li>扩展窗口在所有模型上都优于固定训练，定期用新数据重训有价值。</li>
+    <li>chart 与 MLP 的相对位置依口径而变：S0 下 MLP 明显强于 chart（0.046 对 0.033），扩展窗口下两者接近。chart 更依赖训练数据量，所以"chart ≈ MLP"只限扩展窗口口径。</li>
+  </ul></div>
+</section>
+
+<!-- ============ 3.3 E2G ============ -->
+<section id="e2g">
+  <h2>3.3 E2G：chart 落后是不是因为参数太多</h2>
+  <div class="why"><b>为什么要做</b>：chart-CNN 约 71 万参数，是 1D 的 5.6 倍、MLP 的 25 倍，且结构没有搜参。自然的质疑是：chart 落后也许只是模型太大、过拟合，而不是图像编码不好。</div>
+  <p><b>做了什么</b>：保持 chart 结构不变，三层卷积通道按同一比例缩窄为 k、2k、4k，参数量 P(k) = 150k² + 1476k + 2，k 机械取使参数量最接近目标的整数：</p>
+  <ul>
+    <li><b>ChartCNN-S</b>：k=24（24-48-96），121,826 参数，对标 2008 窗口选定的 1D-CNN（125,825）。</li>
+    <li><b>ChartCNN-M</b>：k=10（10-20-40），29,762 参数，对标 2008 窗口选定的 MLP（28,929）。</li>
+    <li>与完整 chart 完全相同的调参程序；两个小模型选出的超参与完整 chart 相同（lr 1e-4、dropout 0.5、耐心 5）。只跑 2008 一窗，固定权重预测 2008–2026，与 S0 口径直接可比。</li>
+  </ul>
+  <div class="grid2">
+    <div><div class="chart-title">参数量（对数轴）与样本外 Rank IC</div><div class="chart" id="c-e2g-scatter"></div>
+      <div class="chart-note">橙色系三个点是三种宽度的 chart：参数量跨 24 倍，Rank IC 几乎不动；同参数量的 1D、MLP 明显更高。</div></div>
+    <div><div class="chart-title">逐周 Rank IC 配对差（标注 NW-t）</div><div class="chart" id="c-e2g-diff"></div>
+      <div class="chart-note">蓝/绿：同参数量下数值模型领先 chart 的幅度；橙：缩窄 chart 相对完整 chart 的改善。</div></div>
+  </div>
+  <table>
+    <tr><th>模型</th><th class="r">参数量</th><th class="r">验证期 Rank IC</th><th class="r">样本外 Rank IC</th><th class="r">NW-t</th><th class="r">EW 多空 Sharpe</th></tr>
+    <tr><td>chart（完整）</td><td class="r">708,866</td><td class="r">0.0527</td><td class="r">0.0326</td><td class="r">11.9</td><td class="r">2.90</td></tr>
+    <tr><td>ChartCNN-S</td><td class="r">121,826</td><td class="r">0.0523</td><td class="r">0.0359</td><td class="r">13.1</td><td class="r">2.93</td></tr>
+    <tr><td>ChartCNN-M</td><td class="r">29,762</td><td class="r">0.0517</td><td class="r">0.0344</td><td class="r">12.4</td><td class="r">2.83</td></tr>
+    <tr class="hl"><td>1D-CNN</td><td class="r">125,825</td><td class="r">0.0746</td><td class="r">0.0612</td><td class="r">21.2</td><td class="r">3.91</td></tr>
+    <tr><td>MLP</td><td class="r">28,929</td><td class="r">0.0608</td><td class="r">0.0456</td><td class="r">14.3</td><td class="r">3.00</td></tr>
+  </table>
+  <div class="chart-note">验证期 Rank IC 均为 5 个成员的平均，口径一致。三种宽度 chart 得分截面相关：S–完整 0.89，M–完整 0.87，S–M 0.93。</div>
+  <div class="chart-title">逐年 Rank IC（S0 口径：2008 窗口权重固定预测）</div>
+  <div class="chart" id="c-e2g-year"></div>
+  <div class="meaning"><b>含义</b><ul>
+    <li><b>参数量对齐后，数值模型的优势几乎没变</b>：原来 1D 领先完整 chart 0.029，对齐后仍领先 0.025。chart 落后不是"参数太多"造成的。</li>
+    <li>完整 chart 有一点过参数化（缩小后显著但小幅改善），量级只有编码差异的约十分之一。</li>
+    <li>参数从 3 万到 71 万，chart 的验证表现和选股结果几乎不变：chart 能学到什么由图像输入决定，不由网络大小决定。</li>
+    <li>推断：把数值渲染成像素图像，可能损失精度（价格被取整到几十个像素行），或引入不合适的二维几何先验；时序卷积直接读数值，归纳偏置更合适。</li>
+  </ul></div>
+</section>
+
+<!-- ============ 3.4 E7 ============ -->
+<section id="e7">
+  <h2>3.4 E7：控制传统因子后，还有没有增量信息</h2>
+  <p class="lead">Fama-MacBeth 截面回归：模型得分在控制常见因子后能否预测下周执行收益（<code>ret_oo</code>）。主样本 2,795,657 个股票-周、958 周、5,679 只股票。</p>
+  <div class="grid2">
+    <div class="box"><h4>A 层：同一 20 日窗口的技术指标</h4>1 周反转、20 日收益、20 日最大日收益、20 日波动率、成交量趋势、日内振幅、收盘位置、均线偏离。<div class="muted">检验模型是否只是在重新发现常见技术指标。</div></div>
+    <div class="box"><h4>B 层：窗口外信息与公司特征</h4>12-1 月动量、市值、换手率、Amihud 非流动性、特质波动率、账面市值比、盈利价格比，加行业固定效应。</div>
+  </div>
+  <h3>三个事先写定的假设（门槛 t ≥ 3）</h3>
+  <table>
+    <tr><th>假设</th><th>内容</th><th>证据</th><th>判定</th></tr>
+    <tr><td>H1</td><td>每个模型单独放入，控制 A+B 层后仍显著</td><td>β 的 t：chart 11.6、1D 15.4、MLP 14.6；残差 Rank IC 的 t：15.2、20.2、17.4</td><td><span class="badge b-good">三个均成立</span></td></tr>
+    <tr><td>H2</td><td>chart 与 1D 同时放入，各自仍显著</td><td>chart t = 3.18，1D t = 14.47</td><td><span class="badge b-warn">成立，chart 刚过门槛</span></td></tr>
+    <tr><td>H3</td><td>增量不是某一个传统特征的条件分布造成的</td><td>按 7 个条件变量分组后，三个模型组内多空的 t 均 ≥ 3</td><td><span class="badge b-good">成立</span></td></tr>
+  </table>
+  <div class="chart-title">控制变量后的年化收益差（β × 52）</div>
+  <div class="chart" id="c-e7"></div>
+  <div class="chart-note">与 1D 同放后，chart 从 14.2% 降到 3.6%；1D 几乎不受影响（26.6% → 25.1%）。三个模型同时放入时 chart 不再显著（t = 0.46）。</div>
+
+  <h3>E7 §15：训练期稳健性</h3>
+  <table>
+    <tr><th>得分口径</th><th>期间</th><th>H1（三个模型）</th><th>H2</th><th class="r">chart t</th><th class="r">1D t</th></tr>
+    <tr><td>扩展窗口</td><td>2008–2026</td><td><span class="badge b-good">均成立</span></td><td><span class="badge b-good">成立</span></td><td class="r">3.18</td><td class="r">14.47</td></tr>
+    <tr><td>S0</td><td>2008–2026</td><td><span class="badge b-good">均成立</span></td><td><span class="badge b-good">成立</span></td><td class="r">3.61</td><td class="r">13.52</td></tr>
+    <tr><td>扩展窗口</td><td>2014–2026</td><td><span class="badge b-good">均成立</span></td><td><span class="badge b-bad">不成立（仅 1D）</span></td><td class="r">0.86</td><td class="r">9.39</td></tr>
+    <tr><td>S0</td><td>2014–2026</td><td><span class="badge b-good">均成立</span></td><td><span class="badge b-bad">不成立（仅 1D）</span></td><td class="r">2.30</td><td class="r">8.60</td></tr>
+    <tr><td>S1</td><td>2014–2026</td><td><span class="badge b-good">均成立</span></td><td><span class="badge b-good">成立</span></td><td class="r">4.13</td><td class="r">8.62</td></tr>
+  </table>
+  <div class="meaning"><b>含义</b><ul>
+    <li>三个模型都不只是在重新发现动量、反转、波动率等已知因子，都有独立预测信息（H1 在所有口径下成立）。</li>
+    <li>chart 相对 1D 的独立信息很小，大部分已被 1D 包含；再加入 MLP 后完全消失。</li>
+    <li>H2 不稳：chart 的独立信息主要来自 2008–2013，2014 年后在扩展窗口和 S0 下都不显著，只有 S1 例外。按协议判"不稳健"，正文须加限定。</li>
+  </ul></div>
+</section>
+
+<!-- ============ 3.5 E9 ============ -->
+<section id="e9">
+  <h2>3.5 E9：预测力在交易约束和成本后还剩多少</h2>
+  <div class="grid3">
+    <div class="box"><h4>组合</h4>每周买入得分最高的 10%（等权），t+1 开盘买入，下个信号日后首个开盘卖出。只做多头（A 股卖空受限）。</div>
+    <div class="box"><h4>交易约束</h4>停牌或一字涨停买不进则不持有；停牌或一字跌停卖不出则顺延（最多 4 周）；退市按最后收盘价。</div>
+    <div class="box"><h4>成本与基准</h4>佣金买卖各 2.5 bp；印花税按成交日历史税率（2008-09-18 前双边，之后只收卖出）；冲击单边 10 bp。基准为全市场等权（同规则执行、不扣成本）。</div>
+  </div>
+  <div class="grid2">
+    <div><div class="chart-title">年化：毛超额 − 成本 = 净超额</div><div class="chart" id="c-e9"></div></div>
+    <div><div class="chart-title">盈亏平衡冲击成本 vs 假设的 10 bp</div><div class="chart" id="c-e9-be"></div></div>
+  </div>
+  <table>
+    <tr><th>模型</th><th class="r">毛超额（年化）</th><th class="r">毛 t</th><th class="r">每周换手</th><th class="r">每周成本</th><th class="r">净超额（年化）</th><th class="r">净 t</th><th class="r">盈亏平衡</th><th>判定</th></tr>
+    <tr><td>chart</td><td class="r">13.0%</td><td class="r">9.0</td><td class="r">88%</td><td class="r">0.31%</td><td class="r">−3.1%</td><td class="r">−2.21</td><td class="r">约 7 bp</td><td><span class="badge b-bad">不可实现</span></td></tr>
+    <tr class="hl"><td>1D</td><td class="r">17.8%</td><td class="r">10.9</td><td class="r">72%</td><td class="r">0.26%</td><td class="r">+4.5%</td><td class="r">2.85</td><td class="r">约 16 bp</td><td><span class="badge b-warn">弱证据</span></td></tr>
+    <tr><td>MLP</td><td class="r">14.2%</td><td class="r">9.3</td><td class="r">87%</td><td class="r">0.31%</td><td class="r">−1.7%</td><td class="r">−1.12</td><td class="r">约 8 bp</td><td><span class="badge b-bad">不可实现</span></td></tr>
+  </table>
+  <div class="chart-note">年化 = 周均值 × 52。模型间净超额差：1D − chart 每周 0.15%（t=6.0），1D − MLP 0.12%（t=4.2），chart 与 MLP 无显著差别。印花税修正前 1D 为 +4.8%、t=3.01（"可实现"）。</div>
+  <h3>净收益差来自哪里（E11 分解，bp/周）</h3>
+  <table>
+    <tr><th>比较</th><th class="r">净收益优势</th><th class="r">毛超额优势</th><th class="r">成本差异</th><th class="r">其中费税</th><th class="r">其中冲击</th><th class="r">毛超额占比</th></tr>
+    <tr class="hl"><td>1D − chart</td><td class="r">14.63 (t=5.99)</td><td class="r">9.33 (t=3.80)</td><td class="r">5.30</td><td class="r">2.24</td><td class="r">3.06</td><td class="r">64%</td></tr>
+    <tr><td>1D − MLP</td><td class="r">11.88 (t=4.22)</td><td class="r">6.88 (t=2.43)</td><td class="r">5.00</td><td class="r">2.12</td><td class="r">2.89</td><td class="r">58%</td></tr>
+    <tr><td>MLP − chart</td><td class="r">2.75 (t=1.29)</td><td class="r">2.45 (t=1.15)</td><td class="r">0.29</td><td class="r">0.12</td><td class="r">0.17</td><td class="r">89%</td></tr>
+  </table>
+  <div class="chart-note">净收益优势 = 毛超额优势 + 成本差异，逐周严格成立（基准相同）。成本互换反事实：chart 只付 1D 的成本，净超额 −0.7 bp（t=−0.25）；1D 付 chart 的成本，净超额 +3.4 bp（t=1.10）。停牌、一字涨跌停导致的未成交或顺延在三个模型中都不到 1%。</div>
+  <div class="grid2" style="margin-top:10px">
+    <div><div class="chart-title">相邻两周前 10% 名单的重合比例</div><div class="chart" id="c-e9-overlap"></div></div>
+    <div class="meaning" style="margin-top:22px"><b>含义</b><ul>
+      <li>三个模型扣成本前都显著跑赢市场，但每周换掉 70%–90% 持仓，成本约每年 13%–16%，吃掉大部分收益。</li>
+      <li>只有 1D 同时毛收益更高、换手更低，扣成本后仍有正超额，但 t=2.85，单独看还不足以称为稳健可实现；chart、MLP 的盈亏平衡冲击只有 7–8 bp，低于假设的 10 bp。</li>
+      <li>稳健的是相对比较：1D 相对 chart、MLP 的净优势高度显著（t=6.0、4.2）。</li>
+      <li>chart 换手高的原因是名单不稳定：相邻两周前 10% 名单，chart 只有约 12% 重合，1D 约 28%。</li>
+      <li>E7 的"有增量信息"与 E9 的"能否赚钱"是两件事。</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ============ 3.6 E10 ============ -->
+<section id="e10">
+  <h2>3.6 E10：把 chart 和 1D 合起来能否更好</h2>
+  <p class="lead">每周把各模型得分转为截面排名、缩放到 [0, 1] 后等权平均（事先固定，不优化权重）。主检验 C1 = 1D + chart；对照 C2 = 1D + MLP、C3 = 三者。执行规则与成本同 E9。</p>
+  <div class="grid2">
+    <div><div class="chart-title">多头净超额 Sharpe（虚线 = 单独 1D）</div><div class="chart" id="c-e10"></div></div>
+    <div>
+      <table>
+        <tr><th>组合</th><th class="r">净差 t</th><th class="r">Spanning α t</th><th>判定</th></tr>
+        <tr class="hl"><td>C1：1D + chart</td><td class="r">−1.28</td><td class="r">−0.57</td><td><span class="badge b-bad">无组合增量</span></td></tr>
+        <tr><td>C2：1D + MLP</td><td class="r">0.84</td><td class="r">1.76</td><td><span class="badge b-neu">对照，未达门槛</span></td></tr>
+        <tr><td>C3：三者</td><td class="r">0.55</td><td class="r">1.38</td><td><span class="badge b-neu">对照，未达门槛</span></td></tr>
+      </table>
+      <div class="meaning"><b>含义</b><ul>
+        <li>加入 chart 后组合反而变差（0.70 → 0.54），虽不显著，但方向为负。印花税修正前为 0.75 → 0.59，判定不变。</li>
+        <li>chart 的独立信息很小（年化约 3.6%）且换手更高，等权合并相当于用一半权重换来一个较弱、更"抖"的信号，稀释了 1D。</li>
+        <li>合并 MLP 方向为正但不显著，也不能说有增量。</li>
+      </ul></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 4 反常 ============ -->
+<section id="anomaly">
+  <h2>4. 反常现象与排查</h2>
+  <h3>4.1 四个与直觉不符的现象</h3>
+  <table>
+    <tr><th style="width:24%">现象</th><th>直觉</th><th>实际</th><th>解释</th></tr>
+    <tr><td><b>A.</b> 参数最多的 chart 单模型最弱</td><td>更大的深度模型、更丰富的图像表征应更强</td><td>1D 全面领先</td><td>E2G 已排除"参数太多"；主因是图像编码本身不适合</td></tr>
+    <tr><td><b>B.</b> E7 说 chart 有独立信息，合并却没用</td><td>有独立信息 → 合并应增益</td><td>合并不如单独 1D</td><td>独立部分很小且换手高，合并只会稀释；统计上可区分 ≠ 经济上可叠加</td></tr>
+    <tr><td><b>C.</b> chart 的独立信息依赖样本期</td><td>真实信号应稳定</td><td>2014 后在扩展窗口和 S0 下不显著，S1 下又显著</td><td>更像真实时变性（早期样本贡献大），不是计算错误；正文须加限定</td></tr>
+    <tr><td><b>D.</b> chart 和 MLP 换手比 1D 高得多</td><td>预测力相近，换手应相近</td><td>名单周重合 chart ≈12%，1D ≈28%</td><td>chart 排序更"抖"，每周名单变化大，成本更高</td></tr>
+  </table>
+  <h3>4.2 是否可能是代码错误？</h3>
+  <p class="muted">已逐项核对，未发现符号反了、键错位、用错收益列等实现错误的典型迹象。</p>
+  <table>
+    <tr><th>检查项</th><th>结果</th></tr>
+    <tr><td>三个模型预测是否对齐</td><td>主表三模型行数完全相同（3,034,729），E7 样本三模型同行</td></tr>
+    <tr><td>1D 领先是否只是样本外偶然</td><td>每个窗口验证期也是 1D 最高，排序在选超参时就已出现</td></tr>
+    <tr><td>E7 读取的得分文件是否正确</td><td>与登记的 sha1 一致</td></tr>
+    <tr><td>E9 收益方向是否正确</td><td>三个模型毛超额都显著为正，符号合理</td></tr>
+    <tr><td>E9 成本与换手是否按协议计算</td><td>E11 独立重算 958 周，与 E9 逐周一致（误差 1e-16）；审计中发现的印花税偏差已修正并重跑</td></tr>
+    <tr><td>高换手是否为权重公式错误</td><td>名单重合度直接验证了 chart 排序不稳定，与换手差一致</td></tr>
+    <tr><td>合并无增益是否算错</td><td>合并 Sharpe 介于两个成分之间，符合"弱信号稀释强信号"</td></tr>
+    <tr><td>E2G 小模型参数量是否正确</td><td>实际构建模型的参数量与公式完全一致（121,826 / 29,762）</td></tr>
+  </table>
+  <h3>4.3 设计上的局限（已披露）</h3>
+  <ol>
+    <li><b>chart 不搜结构</b>：E2G 已部分弥补，但只跑 2008 一窗；反向检验 1D-CNN-L（把 1D 放大到约 71 万参数）还没做。</li>
+    <li><b>MLP 层数系统附录（E2F）未做</b>：主搜参已选过层数，但未报告落选层数的样本外表现。</li>
+    <li><b>E9 基准未扣成本</b>：净超额略偏保守；但 chart 毛收益已低于 1D、换手更高，不会改变模型间排序。</li>
+    <li><b>E9 印花税为事后修正</b>：看过结果后在审计中发现偏差，按协议原文修正；1D 由"可实现"变为"弱证据"。修正前后结果都保留，偏离已记入协议日志。</li>
+    <li><b>E10 只用等权合并</b>：协议事先固定；验证期权重敏感性尚未跑全。</li>
+    <li><b>看过单变量结果后才冻结协议</b>：不写 pre-registered。</li>
+  </ol>
+</section>
+
+<!-- ============ 5 可靠性 ============ -->
+<section id="reliability">
+  <h2>5. 结论可靠性</h2>
+  <table>
+    <tr><th>结论</th><th>可靠程度</th><th>依据</th></tr>
+    <tr><td>同一信息下 1D-CNN 单模型最强</td><td><span class="badge b-good">高</span></td><td>验证期、样本外、S0、S1 一致；非实现错误</td></tr>
+    <tr><td>chart 落后不是因为参数太多</td><td><span class="badge b-good">高</span></td><td>E2G：同参数量下差距几乎不变</td></tr>
+    <tr><td>chart 落后来自图像编码</td><td><span class="badge b-good">中高</span></td><td>E2G 支持；只覆盖 2008 一窗，1D-CNN-L 未跑</td></tr>
+    <tr><td>控制传统因子后三个模型都有增量（H1）</td><td><span class="badge b-good">高</span></td><td>主规格和 S0/S1 均成立</td></tr>
+    <tr><td>chart 相对 1D 有独立信息（H2）</td><td><span class="badge b-warn">中低</span></td><td>t 刚过 3；2014 年后不成立；再加 MLP 后消失</td></tr>
+    <tr><td>1D 扣成本后净收益显著优于 chart 与 MLP</td><td><span class="badge b-good">高（10 bp 口径）</span></td><td>配对 t=6.0、4.2；约三分之二来自毛收益，换手差有名单重合度支撑</td></tr>
+    <tr><td>1D 自身扣成本后可实现</td><td><span class="badge b-warn">中（弱证据）</span></td><td>净超额为正但 t=2.85 &lt; 3；对成本假设敏感（盈亏平衡冲击约 16 bp）</td></tr>
+    <tr><td>chart 与 1D 合并没有增益</td><td><span class="badge b-good">高</span></td><td>与 chart 独立信息小、换手高一致</td></tr>
+  </table>
+</section>
+
+<!-- ============ 6 故事 ============ -->
+<section id="story">
+  <h2>6. 论文故事</h2>
+  <div class="grid2">
+    <div class="box" style="border-left:4px solid var(--bad)"><h4>不应讲的故事</h4>
+      <ul style="margin:4px 0;padding-left:20px">
+        <li>"图像 CNN 能看到人看不到的模式 / 与数值模型天然互补"：E9、E10 不支持</li>
+        <li>"模型越大越好"：数据相反</li>
+        <li>"chart 只是参数太多，缩小就行"：E2G 否定</li>
+        <li>"H2 成立，所以应把 chart 与 1D 合用"：E10 否定</li>
+      </ul></div>
+    <div class="box" style="border-left:4px solid var(--good)"><h4>标题方向</h4>
+      <i>Same 20-day OHLCV, different encodings: why a temporal 1D-CNN dominates chart images in Chinese A-shares — and why "distinct" signals fail to become implementable alpha.</i></div>
+  </div>
+  <h3>建议的主线</h3>
+  <table>
+    <tr><th style="width:170px">环节</th><th>内容</th><th style="width:130px">证据</th></tr>
+    <tr><td>1. 问题</td><td>同一信息集下，把价量画成图像是否带来额外的可交易预测力？</td><td>—</td></tr>
+    <tr><td>2. 设计可信度</td><td>清理过的 CSMAR；渲染与官方代码一致；扩展窗口；对称调参；协议运行前冻结；偏离如实披露</td><td>§1</td></tr>
+    <tr><td><b>3. 编码而非容量</b></td><td>公平调参后 1D 全面领先；chart 缩到同参数量差距几乎不变。否定"图像自动更强"，把原因定位到编码。建议 E2G 进正文</td><td>3.1–3.3</td></tr>
+    <tr><td><b>4. 统计增量 ≠ 可交易</b></td><td>控制传统因子后三者都有增量，但成本后 chart、MLP 转负，只有 1D 保留正净超额（弱证据，t=2.85）；1D 相对 chart 的净优势高度显著，约三分之二来自毛收益、三分之一来自换手</td><td>3.4、3.5</td></tr>
+    <tr><td><b>5. 弱增量加不进组合</b></td><td>chart 相对 1D 的独立信息小、不稳、换手高，合并无增益</td><td>3.4、3.6</td></tr>
+    <tr><td>6. 限定</td><td>H2 在 2014 年后不稳健；E2G 只覆盖一窗；"chart ≈ MLP"仅限扩展窗口口径；不作因果表述</td><td>3.2、3.4</td></tr>
+    <tr><td>7. 与文献</td><td>支持时序 / 表格模型在短窗口价量上的优势（Gu-Kelly-Xiu 路线）；Jiang 等人的图像方法在 A 股同信息集下更像"成本敏感的弱增量"</td><td>—</td></tr>
+  </table>
+  <div class="oneliner"><b>一句话摘要：</b>在干净的 A 股数据和对称超参搜索下，基于同一 20 日 OHLCV，1D-CNN 的样本外预测力和扣成本后的多头收益都显著优于 chart-CNN 与 MLP（但 1D 自身的净超额只是弱证据）；参数量对标实验表明，chart-CNN 的劣势来自图像编码而非模型容量。chart 在控制回归中的增量仅刚过门槛且子样本不稳，这部分增量在交易成本后无法存活，也不能通过简单合并提升组合表现。</div>
+</section>
+
+<!-- ============ 7 下一步 ============ -->
+<section id="next">
+  <h2>7. 下一步（按对故事的重要性排序）</h2>
+  <ol>
+    <li><b>补跑 1D-CNN-L</b>：把 1D 放大到约 71 万参数。若仍领先完整 chart，"容量 × 编码"2×2 对照闭合，"编码而非容量"可写成定论。约 1 个 GPU 任务、2 小时。可选：E2G 扩展到其余各窗。</li>
+    <li><b>E9 成本敏感性</b>：冲击 0 / 5 / 20 / 30 bp，画盈亏平衡曲线，说明 1D 净超额在多大成本范围内为正、模型间排序是否随成本变化。</li>
+    <li><b>正文表格顺序</b>：主表 → E2G 同参数量对比 → E7 主回归 → E9 净超额 → E10 合并；S0/S1 与 E7 §15 作稳健性小节。</li>
+    <li><b>暂缓</b>：以 H2 为前提的机制实验（E3T–E5T）。</li>
+  </ol>
+</section>
+
+<!-- ============ 8 索引 ============ -->
+<section id="index">
+  <h2>8. 产出索引</h2>
+  <table>
+    <tr><th>内容</th><th>路径 / 作业</th></tr>
+    <tr><td>规格与偏离记录</td><td><code>docs/protocol/clean_spec.md</code> 第 9 节</td></tr>
+    <tr><td>冻结协议</td><td><code>docs/protocol/E7_protocol_v2.md</code>、<code>E9_protocol.md</code>、<code>E10_protocol.md</code>；tag <code>protocol-clean-v1</code></td></tr>
+    <tr><td>主表</td><td><code>WORK_SPACE/paper/ew_main/eval/</code>；<code>ashare_train/eval_ew_main.py</code></td></tr>
+    <tr><td>S0 / S1</td><td><code>WORK_SPACE/paper/ew_main/robustness/eval/</code>；<code>ashare_train/eval_s0_s1.py</code></td></tr>
+    <tr><td>E2G</td><td><code>WORK_SPACE/paper/E2G_clean/R2008/{chartcnn_s,chartcnn_m,eval}/</code>；作业 31828、31829；<code>experiments/E2G_chart_capacity/eval_e2g_clean.py</code></td></tr>
+    <tr><td>E7</td><td><code>WORK_SPACE/paper/E7_incremental_v2/</code>；作业 31675</td></tr>
+    <tr><td>E7 §15</td><td><code>WORK_SPACE/paper/E7_incremental_v2/robustness_s0_s1/</code>；作业 31761</td></tr>
+    <tr><td>E9</td><td><code>WORK_SPACE/paper/E9_execution/</code>；10-15 印花税修正后本地重跑（修正前为作业 31770，存于 <code>_superseded_20261014/</code>）</td></tr>
+    <tr><td>E10</td><td><code>WORK_SPACE/paper/E10_combination/</code>；10-15 随 E9 重跑（修正前为作业 31772，存于 <code>_superseded_20261014/</code>）</td></tr>
+    <tr><td>E11 第一阶段</td><td><code>WORK_SPACE/paper/E11_attribution/stage1/</code>；<code>experiments/E11_attribution/run_e11_stage1.py</code>；说明 <code>docs/results/2026-10-15_E11_stage1_cost_attribution.md</code></td></tr>
+  </table>
+  <p class="muted">本页由 <code>2026-10-14_clean_ew_pipeline_report.md</code> 生成，数字与之一致。</p>
+</section>
+</main>
+</div>
+
+<script>
+const COL = { chart: '#e8833a', oned: '#2f6fdb', mlp: '#2e9e6b', chs: '#f3b47e', chm: '#b9541a',
+              good: '#1e8e5a', bad: '#c8463d', grey: '#9aa3af', gross: '#7fa7e6', cost: '#c8463d', net: '#1e8e5a' };
+const YEARS = Array.from({ length: 19 }, (_, i) => 2008 + i);
+const tip = document.getElementById('tip');
+
+function showTip(e, html) { tip.innerHTML = html; tip.style.display = 'block'; tip.style.left = (e.clientX + 12) + 'px'; tip.style.top = (e.clientY + 12) + 'px'; }
+function hideTip() { tip.style.display = 'none'; }
+function bindTips(host) {
+  host.querySelectorAll('[data-tip]').forEach(n => {
+    n.addEventListener('mousemove', e => showTip(e, n.getAttribute('data-tip')));
+    n.addEventListener('mouseleave', hideTip);
+  });
+}
+function niceTicks(min, max, n = 5) {
+  const span = max - min || 1, step0 = span / n, mag = Math.pow(10, Math.floor(Math.log10(step0))), r = step0 / mag;
+  const step = (r < 1.5 ? 1 : r < 3 ? 2 : r < 7 ? 5 : 10) * mag;
+  const lo = Math.floor(min / step - 1e-9) * step, hi = Math.ceil(max / step - 1e-9) * step, t = [];
+  for (let v = lo; v <= hi + step * 1e-6; v += step) t.push(+v.toFixed(10));
+  return t;
+}
+function svgOpen(W, H) { return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">`; }
+function hostWidth(host, fallback) { const w = host.getBoundingClientRect ? host.getBoundingClientRect().width : 0; return Math.max(Math.floor(w || host.clientWidth || fallback), 280); }
+function legendHTML(items) {
+  return '<div class="legend">' + items.map(s => `<span><i style="background:${s.color}"></i>${s.name}</span>`).join('') + '</div>';
+}
+
+/* 竖向分组柱状图 */
+function barChart(id, o) {
+  const host = document.getElementById(id);
+  const W = hostWidth(host, 520), H = o.height || 260, m = { t: 22, r: 14, b: o.bottom || 40, l: 50 };
+  const vals = o.series.flatMap(s => s.values).filter(v => v != null).concat((o.refs || []).map(r => r.v));
+  let lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
+  hi = hi + (hi - lo) * 0.14; if (lo < 0) lo = lo - (hi - lo) * 0.06;
+  const ticks = niceTicks(lo, hi); const y0 = ticks[0], y1 = ticks[ticks.length - 1];
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const Y = v => m.t + ih - (v - y0) / (y1 - y0) * ih;
+  const band = iw / o.cats.length, inner = band * (o.series.length > 1 ? 0.78 : 0.56), bw = inner / o.series.length;
+  const fmt = o.fmt || (v => v);
+  let s = svgOpen(W, H);
+  ticks.forEach(t => { s += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(t)}" y2="${Y(t)}" stroke="#eef0f3"/><text x="${m.l - 6}" y="${Y(t) + 4}" font-size="11" fill="#7a8591" text-anchor="end">${(o.axisFmt || fmt)(t)}</text>`; });
+  s += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(0)}" y2="${Y(0)}" stroke="#9aa3af"/>`;
+  o.cats.forEach((c, i) => {
+    const x0 = m.l + band * i + (band - inner) / 2;
+    o.series.forEach((se, j) => {
+      const v = se.values[i]; if (v == null) return;
+      const col = Array.isArray(se.color) ? se.color[i] : se.color;
+      const x = x0 + bw * j, yA = Y(Math.max(v, 0)), yB = Y(Math.min(v, 0));
+      s += `<rect x="${x + 1}" y="${yA}" width="${Math.max(bw - 2, 1)}" height="${Math.max(yB - yA, 0.5)}" rx="3" fill="${col}" data-tip="${c}${se.name ? ' · ' + se.name : ''}：${fmt(v)}"/>`;
+      const ly = v >= 0 ? yA - 5 : yB + 13;
+      s += `<text x="${x + bw / 2}" y="${ly}" font-size="${bw < 26 ? 10 : 11.5}" text-anchor="middle" fill="#2b3540" font-weight="600">${fmt(v)}</text>`;
+    });
+    const lines = String(c).split('\n');
+    lines.forEach((ln, k) => { s += `<text x="${m.l + band * i + band / 2}" y="${H - m.b + 16 + k * 14}" font-size="12" text-anchor="middle" fill="#3c4752">${ln}</text>`; });
+  });
+  (o.refs || []).forEach(r => {
+    s += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(r.v)}" y2="${Y(r.v)}" stroke="${r.color || '#c8463d'}" stroke-dasharray="5 4" stroke-width="1.5"/>`;
+    s += `<text x="${W - m.r - 4}" y="${Y(r.v) - 5}" font-size="11" text-anchor="end" fill="${r.color || '#c8463d'}">${r.label}</text>`;
+  });
+  s += '</svg>';
+  host.innerHTML = (o.series.length > 1 && o.series[0].name ? legendHTML(o.series) : '') + s;
+  bindTips(host);
+}
+
+/* 折线图 */
+function lineChart(id, o) {
+  const host = document.getElementById(id);
+  const W = hostWidth(host, 900), H = o.height || 280, m = { t: 16, r: 16, b: 30, l: 50 };
+  const vals = o.series.flatMap(s => s.values);
+  const ticks = niceTicks(Math.min(0, ...vals), Math.max(...vals) * 1.05);
+  const y0 = ticks[0], y1 = ticks[ticks.length - 1], iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const X = i => m.l + iw * i / (o.x.length - 1), Y = v => m.t + ih - (v - y0) / (y1 - y0) * ih;
+  let s = svgOpen(W, H);
+  ticks.forEach(t => { s += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(t)}" y2="${Y(t)}" stroke="${t === 0 ? '#9aa3af' : '#eef0f3'}"/><text x="${m.l - 6}" y="${Y(t) + 4}" font-size="11" fill="#7a8591" text-anchor="end">${t.toFixed(2)}</text>`; });
+  (o.bands || []).forEach(b => {
+    const xa = X(o.x.indexOf(b.from)) - iw / (o.x.length - 1) / 2, xb = X(o.x.indexOf(b.to)) + iw / (o.x.length - 1) / 2;
+    s += `<rect x="${Math.max(xa, m.l)}" y="${m.t}" width="${Math.min(xb, W - m.r) - Math.max(xa, m.l)}" height="${ih}" fill="${b.color}" opacity="0.5"/>`;
+    s += `<text x="${(Math.max(xa, m.l) + Math.min(xb, W - m.r)) / 2}" y="${m.t + 12}" font-size="10.5" fill="#7a8591" text-anchor="middle">${b.label}</text>`;
+  });
+  o.x.forEach((x, i) => { s += `<text x="${X(i)}" y="${H - 10}" font-size="11" fill="#7a8591" text-anchor="middle">${String(x).slice(2)}</text>`; });
+  o.series.forEach(se => {
+    const d = se.values.map((v, i) => `${i ? 'L' : 'M'}${X(i)},${Y(v)}`).join(' ');
+    s += `<path d="${d}" fill="none" stroke="${se.color}" stroke-width="${se.width || 2.2}" ${se.dash ? `stroke-dasharray="${se.dash}"` : ''}/>`;
+    se.values.forEach((v, i) => { s += `<circle cx="${X(i)}" cy="${Y(v)}" r="3.2" fill="${se.color}" data-tip="${o.x[i]} · ${se.name}：${v.toFixed(4)}"/>`; });
+  });
+  s += '</svg>';
+  host.innerHTML = legendHTML(o.series) + s;
+  bindTips(host);
+}
+
+/* 散点（对数 x） */
+function scatterChart(id, o) {
+  const host = document.getElementById(id);
+  const W = hostWidth(host, 520), H = o.height || 280, m = { t: 18, r: 24, b: 40, l: 50 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const lx0 = Math.log10(o.xMin), lx1 = Math.log10(o.xMax);
+  const yt = niceTicks(o.yMin, o.yMax); const y0 = yt[0], y1 = yt[yt.length - 1];
+  const X = v => m.l + (Math.log10(v) - lx0) / (lx1 - lx0) * iw, Y = v => m.t + ih - (v - y0) / (y1 - y0) * ih;
+  let s = svgOpen(W, H);
+  yt.forEach(t => { s += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(t)}" y2="${Y(t)}" stroke="#eef0f3"/><text x="${m.l - 6}" y="${Y(t) + 4}" font-size="11" fill="#7a8591" text-anchor="end">${t.toFixed(3)}</text>`; });
+  o.xTicks.forEach(t => { s += `<line x1="${X(t)}" x2="${X(t)}" y1="${m.t}" y2="${m.t + ih}" stroke="#f1f3f6"/><text x="${X(t)}" y="${H - 22}" font-size="11" fill="#7a8591" text-anchor="middle">${t >= 1e4 ? (t / 1e4) + ' 万' : t}</text>`; });
+  s += `<text x="${m.l + iw / 2}" y="${H - 5}" font-size="11.5" fill="#3c4752" text-anchor="middle">参数量（对数轴）</text>`;
+  (o.links || []).forEach(l => {
+    const a = o.points[l[0]], b = o.points[l[1]];
+    s += `<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(b.x)}" y2="${Y(b.y)}" stroke="${l[2] || '#c3c9d1'}" stroke-dasharray="4 3" stroke-width="1.4"/>`;
+  });
+  o.points.forEach(p => {
+    s += `<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="8" fill="${p.color}" stroke="#fff" stroke-width="2" data-tip="${p.label}：${p.x.toLocaleString()} 参数，Rank IC ${p.y.toFixed(4)}"/>`;
+    s += `<text x="${X(p.x) + (p.dx || 12)}" y="${Y(p.y) + (p.dy || 4)}" font-size="12" fill="#2b3540" font-weight="600" text-anchor="${p.anchor || 'start'}">${p.label}</text>`;
+  });
+  s += '</svg>';
+  host.innerHTML = s; bindTips(host);
+}
+
+/* 横向柱（配对差） */
+function hbarChart(id, o) {
+  const host = document.getElementById(id);
+  const rowH = 46, W = hostWidth(host, 520), m = { t: 8, r: 70, b: 26, l: 190 }, H = m.t + m.b + rowH * o.items.length;
+  const iw = W - m.l - m.r, vmax = Math.max(...o.items.map(d => d.v)) * 1.05;
+  const ticks = niceTicks(0, vmax, 4), x1 = ticks[ticks.length - 1];
+  const X = v => m.l + v / x1 * iw;
+  let s = svgOpen(W, H);
+  ticks.forEach(t => { s += `<line x1="${X(t)}" x2="${X(t)}" y1="${m.t}" y2="${H - m.b}" stroke="#eef0f3"/><text x="${X(t)}" y="${H - 8}" font-size="11" fill="#7a8591" text-anchor="middle">${t.toFixed(3)}</text>`; });
+  o.items.forEach((d, i) => {
+    const y = m.t + i * rowH + 9, h = rowH - 18;
+    s += `<text x="${m.l - 8}" y="${y + h / 2 - 2}" font-size="12" fill="#2b3540" text-anchor="end">${d.label}</text>`;
+    s += `<text x="${m.l - 8}" y="${y + h / 2 + 12}" font-size="11" fill="#7a8591" text-anchor="end">${d.sub || ''}</text>`;
+    s += `<rect x="${m.l}" y="${y}" width="${X(d.v) - m.l}" height="${h}" rx="3" fill="${d.color}" data-tip="${d.label}：${d.v.toFixed(4)}（t=${d.t}）"/>`;
+    s += `<text x="${X(d.v) + 6}" y="${y + h / 2 + 4}" font-size="12" font-weight="600" fill="#2b3540">${d.v.toFixed(4)}  <tspan fill="#7a8591" font-weight="400">t=${d.t}</tspan></text>`;
+  });
+  s += `<line x1="${m.l}" x2="${m.l}" y1="${m.t}" y2="${H - m.b}" stroke="#9aa3af"/></svg>`;
+  host.innerHTML = s; bindTips(host);
+}
+
+/* 扩展窗口时间轴 */
+function timeline() {
+  const host = document.getElementById('timeline');
+  const yrs = Array.from({ length: 27 }, (_, i) => 2000 + i);
+  const wins = [2008, 2011, 2014, 2017, 2020, 2023];
+  let h = '';
+  wins.forEach(R => {
+    const predEnd = R === 2023 ? 2026 : R + 2;
+    const cells = yrs.map(y => {
+      let c = 'transparent', t = '';
+      if (y <= R - 3) { c = '#a9c1e8'; t = '训练'; }
+      else if (y <= R - 1) { c = '#f2c46d'; t = '验证'; }
+      else if (y <= predEnd) { c = '#58b483'; t = '预测'; }
+      return `<span style="background:${c}" data-tip="R=${R} · ${y}${t ? ' · ' + t : ''}"></span>`;
+    }).join('');
+    h += `<div class="tl-row"><div><b>R=${R}</b></div><div class="tl-bar">${cells}</div></div>`;
+  });
+  h += `<div class="tl-row"><div class="muted">S0</div><div class="tl-bar">${yrs.map(y => `<span style="background:${y <= 2005 ? '#a9c1e8' : y <= 2007 ? '#f2c46d' : '#bfe3cd'}"></span>`).join('')}</div></div>`;
+  h += `<div class="tl-row"><div class="muted">S1</div><div class="tl-bar">${yrs.map(y => `<span style="background:${y <= 2011 ? '#a9c1e8' : y <= 2013 ? '#f2c46d' : '#bfe3cd'}"></span>`).join('')}</div></div>`;
+  h += `<div class="tl-axis"><div></div><div class="ticks">${yrs.map(y => `<span>${y % 2 === 0 ? String(y).slice(2) : ''}</span>`).join('')}</div></div>`;
+  host.innerHTML = h; bindTips(host);
+}
+
+const pct = v => (v > 0 ? '' : '') + v.toFixed(1) + '%';
+
+function renderAll() {
+  timeline();
+  barChart('c-main-ic', { cats: ['chart-CNN', '1D-CNN', 'MLP'], series: [{ name: '', color: [COL.chart, COL.oned, COL.mlp], values: [0.0484, 0.0715, 0.0492] }], fmt: v => v.toFixed(3) });
+  barChart('c-main-sh', { cats: ['chart-CNN', '1D-CNN', 'MLP'], series: [
+    { name: 'EW 等权', color: '#5b7fb8', values: [3.153, 4.356, 3.182] },
+    { name: 'VW 市值加权', color: '#b7c6de', values: [1.177, 1.961, 1.065] }], fmt: v => v.toFixed(2) });
+  lineChart('c-main-year', { x: YEARS, series: [
+    { name: 'chart-CNN', color: COL.chart, values: [.0612, .0577, .0620, .0447, .0482, .0542, .0458, .0570, .0291, .0638, .0594, .0528, .0422, .0368, .0489, .0273, .0528, .0451, .0243] },
+    { name: '1D-CNN', color: COL.oned, values: [.0799, .1070, .0873, .0606, .0738, .0838, .0841, .0981, .0603, .0835, .0657, .0636, .0656, .0465, .0701, .0465, .0583, .0729, .0421] },
+    { name: 'MLP', color: COL.mlp, values: [.0656, .0683, .0768, .0607, .0547, .0458, .0406, .0381, .0357, .0654, .0567, .0479, .0392, .0385, .0454, .0337, .0448, .0419, .0310] }] });
+  barChart('c-s0s1', { height: 280, bottom: 48,
+    cats: ['EW\n2008–26', 'S0\n2008–26', 'EW\n2014–26', 'S0\n2014–26', 'S1\n2014–26'],
+    series: [
+      { name: 'chart-CNN', color: COL.chart, values: [0.0484, 0.0326, 0.0455, 0.0233, 0.0334] },
+      { name: '1D-CNN', color: COL.oned, values: [0.0715, 0.0612, 0.0666, 0.0522, 0.0574] },
+      { name: 'MLP', color: COL.mlp, values: [0.0492, 0.0456, 0.0432, 0.0370, 0.0334] }], fmt: v => v.toFixed(3) });
+  scatterChart('c-e2g-scatter', { height: 300, xMin: 2e4, xMax: 1.1e6, yMin: 0.025, yMax: 0.066, xTicks: [3e4, 1e5, 3e5, 1e6],
+    points: [
+      { label: 'chart 完整', x: 708866, y: 0.0326, color: COL.chart, dx: -12, anchor: 'end', dy: 18 },
+      { label: 'ChartCNN-S', x: 121826, y: 0.0359, color: COL.chs, dx: 12, dy: -8 },
+      { label: 'ChartCNN-M', x: 29762, y: 0.0344, color: COL.chm, dx: 12, dy: 18 },
+      { label: '1D-CNN', x: 125825, y: 0.0612, color: COL.oned },
+      { label: 'MLP', x: 28929, y: 0.0456, color: COL.mlp }],
+    links: [[1, 3, '#2f6fdb'], [2, 4, '#2e9e6b'], [0, 1, '#e8b48a'], [1, 2, '#e8b48a']] });
+  hbarChart('c-e2g-diff', { items: [
+    { label: '1D − ChartCNN-S', sub: '同约 12 万参数', v: 0.0253, t: '12.0', color: COL.oned },
+    { label: 'MLP − ChartCNN-M', sub: '同约 3 万参数', v: 0.0112, t: '4.6', color: COL.mlp },
+    { label: 'ChartCNN-S − 完整 chart', sub: '缩窄的改善', v: 0.0033, t: '3.7', color: COL.chs },
+    { label: 'ChartCNN-M − 完整 chart', sub: '缩窄的改善', v: 0.0018, t: '2.1', color: COL.chm }] });
+  lineChart('c-e2g-year', { x: YEARS, height: 270, series: [
+    { name: '1D-CNN', color: COL.oned, values: [.0799, .1070, .0873, .0640, .0752, .0695, .0728, .0635, .0765, .0749, .0618, .0519, .0508, .0304, .0528, .0336, .0386, .0419, .0200] },
+    { name: 'MLP', color: COL.mlp, values: [.0656, .0683, .0768, .0615, .0563, .0554, .0564, .0360, .0517, .0593, .0511, .0316, .0454, .0244, .0449, .0061, .0342, .0210, .0119] },
+    { name: 'chart 完整', color: COL.chart, values: [.0612, .0577, .0620, .0379, .0513, .0452, .0398, .0360, .0248, .0522, .0283, .0190, .0238, .0116, .0331, .0050, .0178, .0083, -.0046] },
+    { name: 'ChartCNN-S', color: COL.chs, dash: '5 3', values: [.0648, .0562, .0621, .0398, .0501, .0417, .0362, .0420, .0281, .0557, .0360, .0274, .0279, .0159, .0462, .0099, .0233, .0114, -.0015] },
+    { name: 'ChartCNN-M', color: COL.chm, dash: '2 3', values: [.0645, .0561, .0605, .0378, .0485, .0436, .0380, .0441, .0237, .0511, .0336, .0232, .0257, .0175, .0418, .0046, .0202, .0116, -.0018] }] });
+  barChart('c-e7', { height: 270, cats: ['chart-CNN', '1D-CNN', 'MLP'], series: [
+    { name: '单独放入 + 控制变量（M1）', color: '#8fb0e3', values: [14.2, 26.6, 18.7] },
+    { name: 'chart 与 1D 同放 + 控制变量（M2）', color: '#1f4e9c', values: [3.6, 25.1, null] }], fmt: pct, axisFmt: v => v + '%' });
+  barChart('c-e9', { height: 280, cats: ['chart-CNN', '1D-CNN', 'MLP'], series: [
+    { name: '毛超额', color: COL.gross, values: [13.0, 17.8, 14.2] },
+    { name: '成本', color: '#e3a29c', values: [-16.1, -13.3, -15.9] },
+    { name: '净超额', color: [COL.bad, COL.good, COL.bad], values: [-3.1, 4.5, -1.7] }], fmt: pct, axisFmt: v => v + '%' });
+  barChart('c-e9-be', { height: 280, cats: ['chart-CNN', '1D-CNN', 'MLP'], series: [{ name: '', color: [COL.chart, COL.oned, COL.mlp], values: [6.6, 16.0, 8.1] }],
+    fmt: v => v.toFixed(0) + ' bp', axisFmt: v => v + ' bp', refs: [{ v: 10, label: '假设冲击 10 bp' }] });
+  barChart('c-e9-overlap', { height: 230, cats: ['chart-CNN', '1D-CNN'], series: [{ name: '', color: [COL.chart, COL.oned], values: [12, 28] }], fmt: v => '约 ' + v + '%', axisFmt: v => v + '%' });
+  barChart('c-e10', { height: 280, cats: ['单独 1D', 'C1\n1D+chart', 'C2\n1D+MLP', 'C3\n三者'], bottom: 48,
+    series: [{ name: '', color: [COL.oned, COL.chart, COL.mlp, '#8b7bc7'], values: [0.704, 0.541, 0.821, 0.762] }],
+    fmt: v => v.toFixed(2), refs: [{ v: 0.704, label: '单独 1D 0.70', color: '#2f6fdb' }] });
+}
+
+renderAll();
+let rt; const rerender = () => { clearTimeout(rt); rt = setTimeout(renderAll, 120); };
+window.addEventListener('resize', rerender);
+window.addEventListener('load', renderAll);
+if (window.ResizeObserver) { let lastW = 0; new ResizeObserver(es => { const w = Math.round(es[0].contentRect.width); if (w !== lastW) { lastW = w; rerender(); } }).observe(document.querySelector('main')); }
+
+const links = [...document.querySelectorAll('nav a')];
+const secs = links.map(a => document.querySelector(a.getAttribute('href')));
+window.addEventListener('scroll', () => {
+  let cur = 0; secs.forEach((s, i) => { if (s && s.getBoundingClientRect().top < 120) cur = i; });
+  links.forEach((a, i) => a.classList.toggle('active', i === cur));
+});
+</script>
+</body>
+</html>

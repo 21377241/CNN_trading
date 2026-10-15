@@ -19,7 +19,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 from experiments.E7_incremental.common import (  # noqa: E402
-    KEYS, OUT_DATA as E7_DATA, SCORES, annualized_sharpe, load_canonical_preds, newey_west_t,
+    EXT_PANEL, KEYS, OUT_DATA as E7_DATA, SCORES, annualized_sharpe, load_canonical_preds, newey_west_t,
 )
 
 OUT = PROJECT_ROOT / 'WORK_SPACE' / 'paper' / 'E9_execution'
@@ -28,24 +28,36 @@ IMPACT_MAIN = 0.0010  # 单边 10 bp
 IMPACT_GRID = (0.0, 0.0005, 0.0010, 0.0020, 0.0030)
 
 
-def stamp_sell_bp(dt: pd.Timestamp) -> float:
-    """卖出印花税（单边，小数）。"""
-    d = pd.Timestamp(dt)
+def stamp_tax(trade_date: pd.Timestamp, side: str) -> float:
+    """印花税（单边，小数），按成交日适用税率（协议第 5 节）：2008-09-18 及之前买卖双边征收，之后只对卖出征收。"""
+    d = pd.Timestamp(trade_date)
     if d <= pd.Timestamp('2008-04-23'):
         return 0.0030
     if d <= pd.Timestamp('2008-09-18'):
         return 0.0010
+    if side == 'buy':
+        return 0.0
     if d <= pd.Timestamp('2023-08-27'):
         return 0.0010
     return 0.0005
 
 
-def buy_cost_bp(impact: float) -> float:
-    return COMMISSION + impact
+def buy_cost_bp(trade_date: pd.Timestamp, impact: float) -> float:
+    return COMMISSION + impact + stamp_tax(trade_date, 'buy')
 
 
-def sell_cost_bp(dt: pd.Timestamp, impact: float) -> float:
-    return COMMISSION + impact + stamp_sell_bp(dt)
+def sell_cost_bp(trade_date: pd.Timestamp, impact: float) -> float:
+    return COMMISSION + impact + stamp_tax(trade_date, 'sell')
+
+
+def trade_dates(signal_dates: pd.Series) -> pd.Series:
+    """信号日 t → 调仓成交日 t+1（下一个市场交易日；上一期持仓在同一开盘卖出）。"""
+    cal = pd.DatetimeIndex(np.sort(pd.read_feather(EXT_PANEL, columns=['Date'])['Date'].unique()))
+    sig = pd.DatetimeIndex(signal_dates.unique()).sort_values()
+    pos = cal.searchsorted(sig, side='right')
+    if (pos >= len(cal)).any():
+        raise RuntimeError('signal date without a following market day')
+    return signal_dates.map(dict(zip(sig, cal[pos])))
 
 
 def load_panel() -> pd.DataFrame:
@@ -53,9 +65,10 @@ def load_panel() -> pd.DataFrame:
     if sample.is_file():
         cols = KEYS + SCORES + ['ret_oo', 'ret_cc', 'FloatMV', 'entry_lock_up', 'not_enterable', 'in_main',
                                 'board']
-        have = pd.read_feather(sample, columns=None)
-        use = [c for c in cols if c in have.columns]
-        df = have[use].copy()
+        import pyarrow.ipc
+        with pyarrow.ipc.open_file(str(sample)) as f:
+            names = set(f.schema.names)
+        df = pd.read_feather(sample, columns=[c for c in cols if c in names])
     else:
         preds = load_canonical_preds()
         rets = pd.read_feather(E7_DATA / 'weekly_returns.feather')
@@ -64,6 +77,7 @@ def load_panel() -> pd.DataFrame:
         df = preds.merge(rets, on=KEYS, how='left').merge(ctrls, on=KEYS, how='left')
     df['StockID'] = df['StockID'].astype(str).str.zfill(6)
     df['ending_date'] = pd.to_datetime(df['ending_date'])
+    df['trade_date'] = trade_dates(df['ending_date'])
     # 可实现：有 ret_oo 且非一字涨停锁仓（协议：锁仓主规格保留进样本但不进组合——此处用 notna ret_oo 且 ~entry_lock）
     if 'entry_lock_up' in df.columns:
         df['tradable'] = df['ret_oo'].notna() & ~df['entry_lock_up'].fillna(False).astype(bool)
@@ -117,14 +131,15 @@ def week_portfolio(g: pd.DataFrame, score: str, weight: str) -> dict:
     }
 
 
-def turnover_cost(prev_w: pd.Series | None, cur_w: pd.Series, dt: pd.Timestamp, impact: float) -> tuple[float, float]:
-    """返回 (单边换手, 成本占组合)。买付 buy_cost，卖付 sell_cost。"""
+def turnover_cost(prev_w: pd.Series | None, cur_w: pd.Series, trade_date: pd.Timestamp,
+                  impact: float) -> tuple[float, float]:
+    """返回 (单边换手, 成本占组合)。买付 buy_cost，卖付 sell_cost，税率按成交日 trade_date。"""
     ids = sorted(set(prev_w.index if prev_w is not None else []) | set(cur_w.index))
     p = (prev_w.reindex(ids).fillna(0.0) if prev_w is not None else pd.Series(0.0, index=ids))
     c = cur_w.reindex(ids).fillna(0.0)
     buy = (c - p).clip(lower=0.0).sum()
     sell = (p - c).clip(lower=0.0).sum()
-    cost = buy * buy_cost_bp(impact) + sell * sell_cost_bp(dt, impact)
+    cost = buy * buy_cost_bp(trade_date, impact) + sell * sell_cost_bp(trade_date, impact)
     return float(buy), float(cost)  # 单边换手用买入权重（≈卖出）
 
 
@@ -137,13 +152,14 @@ def build_series(df: pd.DataFrame, score: str, weight: str, impact: float) -> pd
         port = week_portfolio(g, score, weight)
         if not port:
             continue
-        to, cost = turnover_cost(prev_w, port['w_long'], dt, impact)
+        td = g['trade_date'].iloc[0]
+        to, cost = turnover_cost(prev_w, port['w_long'], td, impact)
         prev_w = port['w_long']
         gross_ex = port['ret_long'] - port['ret_bench']
         net_long = port['ret_long'] - cost
         net_ex = net_long - port['ret_bench']  # 基准无成本（协议：基准同执行规则；简化：基准毛收益）
         rows.append({
-            'ending_date': dt, 'score': score, 'weight': weight, 'impact': impact,
+            'ending_date': dt, 'trade_date': td, 'score': score, 'weight': weight, 'impact': impact,
             'ret_long_gross': port['ret_long'], 'ret_bench': port['ret_bench'],
             'ret_hl_gross': port['ret_hl'], 'turnover_buy': to, 'cost': cost,
             'ret_long_net': net_long, 'ret_excess_gross': gross_ex, 'ret_excess_net': net_ex,
