@@ -53,12 +53,22 @@ def _metric_col(cfg: dict) -> str:
     return 'best_val_rank_ic'
 
 
-def _trial_suffix(patience: int, stage: str = 'hp', metric_tag: str = 'ric') -> str:
-    return f'{metric_tag}-{stage}-p{patience}'
+def _channels(cfg) -> tuple[int, ...] | None:
+    ch = cfg.get('channels')
+    return tuple(int(x) for x in ch) if ch else None
+
+
+def _trial_suffix(patience: int, stage: str = 'hp', metric_tag: str = 'ric',
+                  channels: tuple[int, ...] | None = None) -> str:
+    base = f'{metric_tag}-{stage}-p{patience}'
+    if channels:
+        base += '-ch' + '-'.join(str(c) for c in channels)
+    return base
 
 
 def _trial_row(trial_id: str, phase: str, lr: float, dropout: float, patience: int,
-               train_patience: int, result: dict, stage: str) -> dict:
+               train_patience: int, result: dict, stage: str,
+               channels: tuple[int, ...] | None = None) -> dict:
     return {
         'trial_id': trial_id,
         'phase': phase,
@@ -67,6 +77,7 @@ def _trial_row(trial_id: str, phase: str, lr: float, dropout: float, patience: i
         'dropout': dropout,
         'patience': patience,
         'train_patience': train_patience,
+        'channels': '-'.join(map(str, channels)) if channels else '',
         'best_val_mcc': result.get('best_val_mcc'),
         'best_val_rank_ic': result.get('best_val_rank_ic'),
         'best_val_loss': result.get('best_val_loss'),
@@ -86,6 +97,7 @@ def _run_trial(cfg, lr, dropout, patience, train_patience, n_ensembles,
     pw = cfg['predict_window']
     metric = str(cfg.get('search_metric', 'val_rank_ic'))
     tag = 'mcc' if metric in ('val_mcc', 'mcc') else 'ric'
+    channels = _channels(cfg)
     result = run_cnn_trial(
         ws=ws,
         pw=pw,
@@ -104,13 +116,15 @@ def _run_trial(cfg, lr, dropout, patience, train_patience, n_ensembles,
         max_epochs=cfg.get('max_epochs', 50),
         early_stop_patience=train_patience,
         # cached checkpoints are keyed by the patience actually used for early stopping
-        dir_suffix=_trial_suffix(train_patience, stage='hp', metric_tag=tag),
+        dir_suffix=_trial_suffix(train_patience, stage='hp', metric_tag=tag, channels=channels),
         force_retrain=force,
         search_metric=metric,
         training=cfg['training'],
         monitor=cfg.get('monitor', 'loss'),
+        channels=channels,
     )
-    return _trial_row(trial_id, phase, lr, dropout, patience, train_patience, result, stage)
+    return _trial_row(trial_id, phase, lr, dropout, patience, train_patience, result, stage,
+                      channels=channels)
 
 
 def _best_lr(rows: list, metric_col: str) -> float:
@@ -301,12 +315,13 @@ def run_phase3(cfg, dataset_dir, out_root, force: bool) -> pd.DataFrame:
     ws, pw, freq = cfg['window_size'], cfg['predict_window'], cfg['freq']
     model_name = get_full_model_name(ws)
 
+    channels = _channels(cfg)
     for i, row in candidates.iterrows():
         lr = float(row['lr'])
         dp = float(row['dropout'])
         pat = int(row['patience'])
-        suffix = _trial_suffix(pat, stage='full', metric_tag='ric')
-        logging.info(f'Phase3 full train lr={lr:g} dp={dp} patience={pat} suffix={suffix}')
+        suffix = _trial_suffix(pat, stage='full', metric_tag='ric', channels=channels)
+        logging.info(f'Phase3 full train lr={lr:g} dp={dp} patience={pat} suffix={suffix} ch={channels}')
         train_us_model(
             ws_list=[cfg['window_size']],
             pw_list=[cfg['predict_window']],
@@ -330,6 +345,7 @@ def run_phase3(cfg, dataset_dir, out_root, force: bool) -> pd.DataFrame:
             force_retrain=force,
             training=cfg['training'],
             monitor=cfg.get('monitor', 'loss'),
+            channels=channels,
         )
         exp_leaf = _build_exp_dir(
             model_name, ws, pw, lr, dp, freq,
@@ -340,6 +356,7 @@ def run_phase3(cfg, dataset_dir, out_root, force: bool) -> pd.DataFrame:
         rows.append({
             'lr': lr, 'dropout': dp, 'patience': pat,
             'dir_suffix': suffix,
+            'channels': '-'.join(map(str, channels)) if channels else '',
             'exp_dir': exp_leaf,
             'label': 'anchor' if (
                 lr == cfg['anchor']['lr'] and dp == cfg['anchor']['dropout']

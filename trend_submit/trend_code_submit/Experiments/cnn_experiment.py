@@ -231,7 +231,8 @@ def train_us_model(ws_list: list = None,
                    skip_oos: bool = False,
                    force_retrain: bool = False,
                    training: str = 'legacy',
-                   monitor: str = 'loss'):
+                   monitor: str = 'loss',
+                   channels: list[int] | tuple[int, ...] | None = None):
     """
     训练多个 (window_size, predict_window) 组合的集成 CNN 模型，并生成 OOS 预测。
 
@@ -342,7 +343,7 @@ def train_us_model(ws_list: list = None,
 
             model = init_model(model_name, img_h=img_h, img_w=img_w,
                                 dropout=dropout, n_classes=2,
-                                window_size=ws).to(device)
+                                window_size=ws, channels=channels).to(device)
             optimizer = optim.Adam(model.parameters(), lr=lr)
             criterion = nn.CrossEntropyLoss()
             scheduler = None
@@ -438,6 +439,7 @@ def train_us_model(ws_list: list = None,
                 dropout=dropout,
                 model_name=model_name,
                 dataset_dir=dataset_dir,
+                channels=channels,
                 sample_mode=oos_mode,
             )
         else:
