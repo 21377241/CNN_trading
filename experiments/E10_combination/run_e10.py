@@ -23,7 +23,9 @@ from experiments.E9_tradable.run_e9 import (  # noqa: E402
     IMPACT_MAIN, build_series, load_panel,
 )
 
-OUT = PROJECT_ROOT / 'WORK_SPACE' / 'paper' / 'E10_combination'
+import os  # noqa: E402
+OUT = (Path(os.environ['E10_OUT_DIR']) if os.environ.get('E10_OUT_DIR')
+       else PROJECT_ROOT / 'WORK_SPACE' / 'paper' / 'E10_combination')
 
 
 def add_combo_scores(df: pd.DataFrame) -> pd.DataFrame:

@@ -31,8 +31,9 @@ from experiments.common.metrics import newey_west_t  # noqa: E402
 from experiments.E7_incremental.common import CTRL_A, CTRL_B  # noqa: E402
 from experiments.E12_signal_stability.run_e12_stage2 import E7_SAMPLE, KEYS, build_sample, col  # noqa: E402
 
+import os  # noqa: E402
 PAPER = PROJECT_ROOT / 'WORK_SPACE' / 'paper'
-OUT = PAPER / 'E12_signal_stability' / 'stage3'
+OUT = Path(os.environ['E12_STAGE3_OUT']) if os.environ.get('E12_STAGE3_OUT') else PAPER / 'E12_signal_stability' / 'stage3'
 SCORES = {'s_chart': 'Chart-CNN', 's_1d': '1D-CNN', 's_mlp4': 'MLP'}
 PAIRS = [('s_1d', 's_chart'), ('s_1d', 's_mlp4'), ('s_mlp4', 's_chart')]
 CTRLS = CTRL_A + CTRL_B

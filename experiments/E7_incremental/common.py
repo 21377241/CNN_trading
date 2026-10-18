@@ -28,8 +28,12 @@ DATA = Path(ASHARE_PROCESSED_DATA_DIR)
 EXT_PANEL = Path(ASHARE_PANEL_PATH)
 STOCK_INFO = Path(ASHARE_STOCK_INFO_PATH)
 # 主分析 E7 输出（EW 拼接预测）；旧 S0 固定切分结果仍可指向 E7_incremental（见 E7_USE_EW=0）
+# E7_OUT_DIR：覆盖输出根目录（用于 float64 修正版并列重跑，不覆盖已验收产物）
+# E7_ONED_KEY：覆盖 s_1d 对应的 registry 名（默认 onedcnn_140_ew；修正版为 onedcnn_140_ew_v2）
 _USE_EW = os.environ.get('E7_USE_EW', '1') != '0'
-OUT = PROJECT_ROOT / 'WORK_SPACE' / 'paper' / ('E7_incremental_v2' if _USE_EW else 'E7_incremental')
+_OUT_ENV = os.environ.get('E7_OUT_DIR')
+OUT = (Path(_OUT_ENV) if _OUT_ENV
+       else PROJECT_ROOT / 'WORK_SPACE' / 'paper' / ('E7_incremental_v2' if _USE_EW else 'E7_incremental'))
 OUT_DATA = OUT / 'data'
 WEEKLY_RETURNS = OUT_DATA / 'weekly_returns.feather'
 WEEKLY_CONTROLS = OUT_DATA / 'weekly_controls.feather'
@@ -41,10 +45,11 @@ OOS_START, OOS_END = pd.Timestamp('2008-01-01'), pd.Timestamp('2026-09-30')
 REGISTRY_V2 = PROJECT_ROOT / 'WORK_SPACE' / 'paper' / 'registry_v2.json'
 SCORES = ['s_chart', 's_1d', 's_mlp4']
 CHART_S = 's_chartS'
+_ONED_KEY = os.environ.get('E7_ONED_KEY', 'onedcnn_140_ew' if _USE_EW else 'onedcnn_140')
 REGISTRY_NAMES = (
-    {'s_chart': 'chartcnn_ew', 's_1d': 'onedcnn_140_ew', 's_mlp4': 'mlp_140_ew', CHART_S: 'chartcnn_s'}
+    {'s_chart': 'chartcnn_ew', 's_1d': _ONED_KEY, 's_mlp4': 'mlp_140_ew', CHART_S: 'chartcnn_s'}
     if _USE_EW else
-    {'s_chart': 'chartcnn_clean', 's_1d': 'onedcnn_140', 's_mlp4': 'mlp_140', CHART_S: 'chartcnn_s'}
+    {'s_chart': 'chartcnn_clean', 's_1d': _ONED_KEY, 's_mlp4': 'mlp_140', CHART_S: 'chartcnn_s'}
 )
 
 

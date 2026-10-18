@@ -31,11 +31,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 from experiments.common.metrics import newey_west_t  # noqa: E402
 
+import os  # noqa: E402
 PAPER = PROJECT_ROOT / 'WORK_SPACE' / 'paper'
-E7_SAMPLE = PAPER / 'E7_incremental_v2' / 'data' / 'e7_sample.feather'
+E7_SAMPLE = (Path(os.environ['E7_SAMPLE']) if os.environ.get('E7_SAMPLE')
+             else PAPER / 'E7_incremental_v2' / 'data' / 'e7_sample.feather')
 EW_PRED = PAPER / 'ew_main' / 'eval' / 'pred_chart_ew_oos.parquet'
-E9_WEEKLY = PAPER / 'E9_execution' / 'portfolio_weekly.parquet'
-OUT = PAPER / 'E12_signal_stability' / 'stage1'
+E9_WEEKLY = (Path(os.environ['E9_WEEKLY']) if os.environ.get('E9_WEEKLY')
+             else PAPER / 'E9_execution' / 'portfolio_weekly.parquet')
+OUT = Path(os.environ['E12_STAGE1_OUT']) if os.environ.get('E12_STAGE1_OUT') else PAPER / 'E12_signal_stability' / 'stage1'
 KEYS = ['StockID', 'ending_date']
 SCORES = {'s_chart': 'Chart-CNN', 's_1d': '1D-CNN', 's_mlp4': 'MLP'}
 PAIRS = [('s_1d', 's_chart'), ('s_1d', 's_mlp4'), ('s_mlp4', 's_chart')]

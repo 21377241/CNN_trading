@@ -28,12 +28,13 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from experiments.common.metrics import newey_west_t  # noqa: E402
 from experiments.E9_tradable.run_e9 import COMMISSION, stamp_tax, trade_dates  # noqa: E402
 
+import os  # noqa: E402
 PAPER = PROJECT_ROOT / 'WORK_SPACE' / 'paper'
-E7_DATA = PAPER / 'E7_incremental_v2' / 'data'
-E9 = PAPER / 'E9_execution'
-E9_V1 = E9 / '_superseded_20261014'
-OUT = PAPER / 'E11_attribution' / 'stage1'
-OUT_V1 = OUT / '_v1_superseded_20261014'
+E7_DATA = Path(os.environ['E7_DATA_DIR']) if os.environ.get('E7_DATA_DIR') else PAPER / 'E7_incremental_v2' / 'data'
+E9 = Path(os.environ['E9_OUT_DIR']) if os.environ.get('E9_OUT_DIR') else PAPER / 'E9_execution'
+E9_V1 = (PAPER / 'E9_execution') / '_superseded_20261014'
+OUT = Path(os.environ['E11_OUT_DIR']) if os.environ.get('E11_OUT_DIR') else PAPER / 'E11_attribution' / 'stage1'
+OUT_V1 = (PAPER / 'E11_attribution' / 'stage1') / '_v1_superseded_20261014'
 KEYS = ['StockID', 'ending_date']
 SCORES = {'s_chart': 'Chart-CNN', 's_1d': '1D-CNN', 's_mlp4': 'MLP'}
 IMPACT = 0.0010

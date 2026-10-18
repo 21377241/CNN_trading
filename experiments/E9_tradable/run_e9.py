@@ -22,7 +22,9 @@ from experiments.E7_incremental.common import (  # noqa: E402
     EXT_PANEL, KEYS, OUT_DATA as E7_DATA, SCORES, annualized_sharpe, load_canonical_preds, newey_west_t,
 )
 
-OUT = PROJECT_ROOT / 'WORK_SPACE' / 'paper' / 'E9_execution'
+import os  # noqa: E402
+OUT = (Path(os.environ['E9_OUT_DIR']) if os.environ.get('E9_OUT_DIR')
+       else PROJECT_ROOT / 'WORK_SPACE' / 'paper' / 'E9_execution')
 COMMISSION = 0.00025  # 单边 2.5 bp
 IMPACT_MAIN = 0.0010  # 单边 10 bp
 IMPACT_GRID = (0.0, 0.0005, 0.0010, 0.0020, 0.0030)

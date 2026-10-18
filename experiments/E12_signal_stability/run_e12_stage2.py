@@ -25,10 +25,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 from experiments.common.metrics import newey_west_t  # noqa: E402
 
+import os  # noqa: E402
 PAPER = PROJECT_ROOT / 'WORK_SPACE' / 'paper'
-E7_SAMPLE = PAPER / 'E7_incremental_v2' / 'data' / 'e7_sample.feather'
-MAIN_SUMMARY = PAPER / 'ew_main' / 'eval' / 'summary.csv'
-OUT = PAPER / 'E12_signal_stability' / 'stage2'
+E7_SAMPLE = (Path(os.environ['E7_SAMPLE']) if os.environ.get('E7_SAMPLE')
+             else PAPER / 'E7_incremental_v2' / 'data' / 'e7_sample.feather')
+MAIN_SUMMARY = (Path(os.environ['MAIN_SUMMARY']) if os.environ.get('MAIN_SUMMARY')
+                else PAPER / 'ew_main' / 'eval' / 'summary.csv')
+OUT = Path(os.environ['E12_STAGE2_OUT']) if os.environ.get('E12_STAGE2_OUT') else PAPER / 'E12_signal_stability' / 'stage2'
 KEYS = ['StockID', 'ending_date']
 SCORES = {'s_chart': 'Chart-CNN', 's_1d': '1D-CNN', 's_mlp4': 'MLP'}
 AGES = (0, 1, 2, 4)
@@ -210,8 +213,11 @@ def main() -> int:
     plot(summary, OUT / 'ic_by_age.png')
 
     main_ref = pd.read_csv(MAIN_SUMMARY).set_index('model')['rank_ic_mean']
-    info['ic0_main_table'] = {'Chart-CNN': float(main_ref['chart']), '1D-CNN': float(main_ref['oned']),
+    # 兼容主表列名：ew_main 用 oned；ew_main_f64 并列表用 oned_v2（优先）/ oned_old
+    oned_key = next(k for k in ('oned_v2', 'oned', 'oned_old') if k in main_ref.index)
+    info['ic0_main_table'] = {'Chart-CNN': float(main_ref['chart']), '1D-CNN': float(main_ref[oned_key]),
                               'MLP': float(main_ref['mlp'])}
+    info['ic0_main_table_oned_key'] = oned_key
     info['bootstrap'] = {'reps': BOOT_REPS, 'block_weeks': BOOT_BLOCK, 'seed': SEED}
     (OUT / 'run_manifest.json').write_text(json.dumps(info, indent=2, ensure_ascii=False), encoding='utf-8')
 
